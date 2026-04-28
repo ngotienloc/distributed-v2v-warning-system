@@ -6,6 +6,8 @@ idf_component_register(
     INCLUDE_DIRS
         "."
         "drivers"
+        "task"
+
 
     REQUIRES
         driver
@@ -14,5 +16,6 @@ idf_component_register(
         log
         esp_system
         esp_event
+        nvs_flash
 )
 

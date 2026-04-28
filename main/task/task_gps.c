@@ -34,12 +34,8 @@ static void on_fix(const gps_fix_t *fix, void *ctx)
 
 void task_gps(void *arg)
 {
-#ifndef V2V_HW_STUB
     gps_register_cb(on_fix, NULL);
     ESP_LOGI(TAG, "GPS callback registered -> q_gps");
-#else
-    ESP_LOGW(TAG, "[STUB] GPS driver bypassed");
-#endif
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));

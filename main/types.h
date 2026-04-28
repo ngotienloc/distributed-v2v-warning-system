@@ -3,6 +3,16 @@
 #include <stdbool.h>
 
 typedef struct {
+    float accel_x;  
+    float accel_y; 
+    float accel_z; 
+    float gyro_x;   
+    float gyro_y;   
+    float gyro_z;   
+    float dt;       
+} imu_data_t;
+
+typedef struct {
     float latitude; 
     float longitude; 
     float speed; 
