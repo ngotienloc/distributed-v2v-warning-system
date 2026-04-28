@@ -7,6 +7,7 @@ idf_component_register(
         "."
         "drivers"
         "task"
+        "fusion"
 
 
     REQUIRES

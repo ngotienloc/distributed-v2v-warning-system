@@ -33,3 +33,9 @@
 
 
 #define CFG_PERIOD_IMU_MS       10   
+
+//Complementary filter - IMU (pitch/roll)
+#define CFG_CF_ALPHA_BASE       0.98f   
+#define CFG_CF_ACCEL_ERR_SOFT   0.8f 
+#define CFG_CF_ACCEL_ERR_HARD   1.5f    
+#define CFG_CF_WARMUP_TICKS     50  
