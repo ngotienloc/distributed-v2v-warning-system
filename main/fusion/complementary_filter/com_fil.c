@@ -59,3 +59,15 @@ void imu_filter_update(imu_filter_state_t *s, const imu_data_t   *imu, float dt)
     }
 
 }
+
+void imu_filter_fuse_gps_heading(imu_filter_state_t *s,
+                                  float               gps_heading,
+                                  float               gps_speed)
+{
+    if (gps_speed < CFG_HDG_MIN_SPEED_MS) return;
+    float error = angle_diff(gps_heading, s->heading);
+    s->heading  = normalize_angle(s->heading + CFG_HDG_GPS_ALPHA * error);
+}
+
+
+    
