@@ -39,3 +39,7 @@
 #define CFG_CF_ACCEL_ERR_SOFT   0.8f 
 #define CFG_CF_ACCEL_ERR_HARD   1.5f    
 #define CFG_CF_WARMUP_TICKS     50  
+
+//Complementary filer - IMU+GPS (heading)
+#define CFG_HDG_MIN_SPEED_MS    0.5f  
+#define CFG_HDG_GPS_ALPHA       0.10f
