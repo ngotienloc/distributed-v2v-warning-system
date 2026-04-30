@@ -43,10 +43,11 @@ void imu_filter_update(imu_filter_state_t *s, const imu_data_t   *imu, float dt)
     float accel_pitch = atan2f(-imu->accel_x, sqrtf(SQ(imu->accel_y) + SQ(imu->accel_z))); // pitch by accel
     float accel_roll  = atan2f( imu->accel_y, imu->accel_z);    // roll by accel
 
-    s->pitch = CFG_CF_ALPHA_BASE * (s->pitch + imu->gyro_y * dt)
-             + (1.0f - CFG_CF_ALPHA_BASE) * accel_pitch;
-    s->roll  = CFG_CF_ALPHA_BASE * (s->roll  + imu->gyro_x * dt)
-             + (1.0f - CFG_CF_ALPHA_BASE) * accel_roll;
+    float alpha = compute_cf_alpha(imu);
+    s->pitch = alpha * (s->pitch + imu->gyro_y * dt)
+             + (1.0f - alpha) * accel_pitch;
+    s->roll  = alpha * (s->roll  + imu->gyro_x * dt)
+             + (1.0f - alpha) * accel_roll;
 
     s->heading = normalize_angle(s->heading - imu->gyro_z * dt);    //update heading imu 
 
@@ -69,5 +70,9 @@ void imu_filter_fuse_gps_heading(imu_filter_state_t *s,
     s->heading  = normalize_angle(s->heading + CFG_HDG_GPS_ALPHA * error);
 }
 
+bool imu_filter_detect_brake(const imu_filter_state_t *s)
+{
+    return s->accel_x_lin < CFG_EBBL_BRAKE_MS2;
+}
 
     

@@ -7,6 +7,7 @@ static const char *TAG = "app_queues";
 QueueHandle_t      q_imu          = NULL;
 QueueHandle_t      q_gps          = NULL;
 
+
 esp_err_t app_queues_init(void)
 {
     q_imu           = xQueueCreate(4, sizeof(imu_data_t));
