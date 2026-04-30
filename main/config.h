@@ -43,3 +43,10 @@
 //Complementary filer - IMU+GPS (heading)
 #define CFG_HDG_MIN_SPEED_MS    0.5f  
 #define CFG_HDG_GPS_ALPHA       0.10f
+
+//Dead Reckoning
+#define CFG_ZVU_SPEED_MS        0.3f
+
+//Cordinate transportation 
+#define CFG_M_PER_LAT_DEG       110540.0f
+#define CFG_M_PER_LON_DEG_BASE  111320.0f
