@@ -52,5 +52,34 @@ typedef struct {
     float    gyro_z;        
     bool     gps_valid;
     uint32_t nmea_time_ms; 
+    uint32_t local_ts_ms;
     uint32_t update_ts_ms; 
 } vehicle_state_t;
+
+
+typedef enum {
+    ALERT_TYPE_NONE = 0,
+    ALERT_TYPE_EBBL = 1,
+    ALERT_TYPE_IMA  = 2,
+} alert_type_t;
+
+typedef enum {
+    ALERT_LEVEL_NONE     = 0,
+    ALERT_LEVEL_INFO     = 1,
+    ALERT_LEVEL_WARNING  = 2,
+    ALERT_LEVEL_CRITICAL = 3,
+} alert_level_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  magic;
+    uint8_t  id[4];
+    float    lat;
+    float    lon;
+    float    speed;
+    float    heading;
+    float    accel_x_lin;
+    float    gyro_z;
+    uint8_t  alert_type;
+    uint8_t  alert_level;
+    uint32_t nmea_time_ms;
+} v2v_packet_t;

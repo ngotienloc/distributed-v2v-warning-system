@@ -8,15 +8,18 @@ idf_component_register(
         "drivers"
         "task"
         "fusion"
+        "v2v"
 
 
     REQUIRES
         driver
+        esp_wifi
+        esp_netif
+        nvs_flash
         esp_timer
         freertos
         log
         esp_system
         esp_event
-        nvs_flash
 )
 

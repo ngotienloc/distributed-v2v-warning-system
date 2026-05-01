@@ -54,3 +54,9 @@
 //EBBL
 #define CFG_EBBL_COOLDOWN_MS    500  
 #define CFG_EBBL_BRAKE_MS2      (-2.5f) 
+
+//V2V
+#define CFG_PKT_MAGIC           0xB6 
+#define CFG_ESPNOW_BCAST        {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF}
+#define CFG_PKT_STALE_MS        500  
+#define CFG_ESPNOW_CHANNEL      1

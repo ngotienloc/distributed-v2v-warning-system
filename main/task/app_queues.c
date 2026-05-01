@@ -6,6 +6,9 @@ static const char *TAG = "app_queues";
 
 QueueHandle_t      q_imu          = NULL;
 QueueHandle_t      q_gps          = NULL;
+QueueHandle_t      q_fusion_out   = NULL;
+QueueHandle_t      q_ego_state    = NULL;
+QueueHandle_t      q_v2v_rx       = NULL;
 
 
 esp_err_t app_queues_init(void)

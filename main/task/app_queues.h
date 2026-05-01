@@ -13,6 +13,10 @@ extern EventGroupHandle_t g_ebbl_evt;
 
 extern QueueHandle_t q_fusion_out;
 
+extern QueueHandle_t q_ego_state;
+
+extern QueueHandle_t q_v2v_rx;
+
 esp_err_t app_queues_init(void);
 
 #define EBBL_BRAKE_BIT   BIT0
