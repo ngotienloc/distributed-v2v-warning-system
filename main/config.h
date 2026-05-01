@@ -50,3 +50,7 @@
 //Cordinate transportation 
 #define CFG_M_PER_LAT_DEG       110540.0f
 #define CFG_M_PER_LON_DEG_BASE  111320.0f
+
+//EBBL
+#define CFG_EBBL_COOLDOWN_MS    500  
+#define CFG_EBBL_BRAKE_MS2      (-2.5f) 

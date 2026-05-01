@@ -17,4 +17,4 @@ void imu_filter_update(imu_filter_state_t *s, const imu_data_t   *imu, float dt)
 
 void imu_filter_fuse_gps_heading(imu_filter_state_t *s, float gps_heading, float gps_speed);
 
-
+bool imu_filter_detect_brake(const imu_filter_state_t *s);
