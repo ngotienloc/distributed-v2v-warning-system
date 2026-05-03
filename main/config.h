@@ -111,6 +111,7 @@
 
 // EBBL
 #define CFG_EBBL_BRAKE_MS2      (-2.5f)
+#define CFG_EBBL_BRAKE_COUNT    3       /* consecutive 10ms samples required — filters hand-shake spikes */
 #define CFG_EBBL_CONE_DEG       30.0f   
 #define CFG_EBBL_MAX_DIST_M     150.0f 
 #define CFG_EBBL_TTC_CRIT_S     2.0f   

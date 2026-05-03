@@ -57,7 +57,11 @@ void task_collision(void *arg)
         alert_result_t best = {0};
 
         vehicle_state_t self = ci.ego;
-        /* Preserve self.x and self.y (Ego's dead reckoning offset from self.lat/lon origin) */
+        /* In the ENU frame used here, ego is the origin.
+         * peer.x/y are computed via geo_latlon_to_enu(self.lat, self.lon, ...)
+         * so they are already relative to (0,0). Force self.x/y = 0 to match. */
+        self.x = 0.0f;
+        self.y = 0.0f;
 
         for (int i = 0; i < ci.n_peers; i++) {
             vehicle_state_t peer = ci.peers[i];

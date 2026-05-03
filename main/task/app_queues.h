@@ -23,8 +23,6 @@ extern QueueHandle_t q_collision_in;
 
 extern QueueHandle_t q_alert_tft;
 
-extern EventGroupHandle_t g_ebbl_evt;
-
 esp_err_t app_queues_init(void);
 
 #define EBBL_BRAKE_BIT   BIT0

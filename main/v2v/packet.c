@@ -35,11 +35,8 @@ bool packet_deserialize(const v2v_packet_t *pkt, vehicle_state_t *out)
 {
     if (!packet_is_valid(pkt)) return false;
 
-    /* Stale check against wall time */
-    uint32_t age = now_ms() - /* placeholder, see note below */ 0;
-    (void)age;
-    /* NOTE: stale check is done in neighbor table using local_ts_ms.
-     * Here we just populate the vehicle_state_t. */
+    /* NOTE: stale check is handled by neighbor_table via update_ts_ms.
+     * Here we only populate vehicle_state_t from the wire packet. */
 
     memset(out, 0, sizeof(*out));
     memcpy(out->id, pkt->id, 4);

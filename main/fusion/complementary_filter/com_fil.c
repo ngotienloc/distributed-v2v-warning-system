@@ -70,9 +70,15 @@ void imu_filter_fuse_gps_heading(imu_filter_state_t *s,
     s->heading  = normalize_angle(s->heading + CFG_HDG_GPS_ALPHA * error);
 }
 
-bool imu_filter_detect_brake(const imu_filter_state_t *s)
+bool imu_filter_detect_brake(imu_filter_state_t *s)
 {
-    return s->accel_x_lin < CFG_EBBL_BRAKE_MS2;
+    if (s->accel_x_lin < CFG_EBBL_BRAKE_MS2) {
+        if (s->brake_count < CFG_EBBL_BRAKE_COUNT)
+            s->brake_count++;
+    } else {
+        s->brake_count = 0;
+    }
+    return s->brake_count >= CFG_EBBL_BRAKE_COUNT;
 }
 
     
