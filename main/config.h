@@ -52,8 +52,15 @@
 #define CFG_M_PER_LON_DEG_BASE  111320.0f
 
 //EBBL
+#define CFG_EBBL_BRAKE_MS2      (-2.5f)
+#define CFG_EBBL_CONE_DEG       30.0f   
+#define CFG_EBBL_MAX_DIST_M     150.0f 
+#define CFG_EBBL_TTC_CRIT_S     2.0f   
+#define CFG_EBBL_TTC_WARN_S     4.0f   
+#define CFG_EBBL_TTC_INFO_S     6.0f 
+#define CFG_EBBL_BURST_COUNT    3      
+#define CFG_EBBL_BURST_MS       20      
 #define CFG_EBBL_COOLDOWN_MS    500  
-#define CFG_EBBL_BRAKE_MS2      (-2.5f) 
 
 //V2V
 #define CFG_PKT_MAGIC           0xB6 
