@@ -1,11 +1,12 @@
-file(GLOB_RECURSE MAIN_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+file(GLOB_RECURSE MAIN_SRCS "main.c" "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
 idf_component_register(
     SRCS
         ${MAIN_SRCS}
 
     INCLUDE_DIRS
         "."
-        "drivers"
+        "drivers/gps"
+        "drivers/imu"
         "task"
         "fusion"
         "v2v"

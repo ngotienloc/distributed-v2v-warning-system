@@ -70,6 +70,16 @@ typedef enum {
     ALERT_LEVEL_CRITICAL = 3,
 } alert_level_t;
 
+typedef struct {
+    alert_type_t  type;
+    alert_level_t level;
+    float         ttc_s;    
+    float         delta_t_s; 
+    float         dist_m;   
+    uint8_t       peer_id[4];
+    int           n_peers;    
+} alert_result_t;
+
 typedef struct __attribute__((packed)) {
     uint8_t  magic;
     uint8_t  id[4];
@@ -83,3 +93,10 @@ typedef struct __attribute__((packed)) {
     uint8_t  alert_level;
     uint32_t nmea_time_ms;
 } v2v_packet_t;
+
+#define COLLISION_MAX_PEERS  16
+typedef struct {
+    vehicle_state_t ego;
+    vehicle_state_t peers[COLLISION_MAX_PEERS];
+    int             n_peers;
+} collision_input_t;
