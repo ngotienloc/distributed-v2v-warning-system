@@ -73,6 +73,23 @@ void ntable_upsert(const vehicle_state_t *peer)
     xSemaphoreGive(s_mutex);
 }
 
+void ntable_evict_stale(uint32_t now_ms)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (!s_table[i].active) continue;
+        uint32_t age = now_ms - s_table[i].state.update_ts_ms;
+        if (age > CFG_PKT_STALE_MS) {
+            ESP_LOGD(TAG, "Evicting stale peer [%02X%02X%02X%02X] age=%lums",
+                     s_table[i].state.id[0], s_table[i].state.id[1],
+                     s_table[i].state.id[2], s_table[i].state.id[3],
+                     (unsigned long)age);
+            s_table[i].active = false;
+        }
+    }
+    xSemaphoreGive(s_mutex);
+}
+
 int ntable_get_all(vehicle_state_t *out, int max)
 {
     int count = 0;
@@ -94,7 +111,6 @@ int ntable_count(void)
     xSemaphoreGive(s_mutex);
     return count;
 }
-
 
 
 
