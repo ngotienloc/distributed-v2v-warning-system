@@ -2,7 +2,6 @@
 #include "freertos/task.h"
 #include "app_queues.h"
 #include "collision/ebbl/ebbl.h"
-#include "collision/ima/ima.h"
 #include "fusion/geo_utils/geo_utils.h"
 #include "config.h"
 #include "esp_log.h"
@@ -27,7 +26,7 @@ void task_collision(void *arg)
     collision_input_t ci;
     alert_result_t    result;
 
-    ESP_LOGI(TAG, "started — q_collision_in -> EBBL+IMA -> q_alert_tft");
+    ESP_LOGI(TAG, "started — q_collision_in -> EBBL -> q_alert_tft");
 
     while (1) {
         /* ── 1. Block on q_collision_in ────────────────────────── *
@@ -95,16 +94,11 @@ void task_collision(void *arg)
             alert_result_t r_ebbl = ebbl_eval(&self, &peer);
             best = pick_worse(best, r_ebbl);
 
-            /* 4d. IMA evaluation */
-            alert_result_t r_ima = ima_eval(&self, &peer);
-            best = pick_worse(best, r_ima);
-
-            if (r_ebbl.level || r_ima.level) {
+            if (r_ebbl.level) {
                 ESP_LOGI(TAG,
-                         "Peer [%02X%02X%02X%02X] EBBL_lvl=%d IMA_lvl=%d dist=%.0fm",
+                         "Peer [%02X%02X%02X%02X] EBBL_lvl=%d dist=%.0fm",
                          peer.id[0], peer.id[1], peer.id[2], peer.id[3],
-                         r_ebbl.level, r_ima.level,
-                         r_ebbl.level ? r_ebbl.dist_m : r_ima.dist_m);
+                         r_ebbl.level, r_ebbl.dist_m);
             }
         }
 

@@ -44,7 +44,7 @@ typedef struct {
     float    velocity;     
     float    heading;      
 
-    /* Extended fields (needed by EBBL / IMA) */
+    /* Extended fields (needed by EBBL) */
     uint8_t  id[4];   
     float    lat;          
     float    lon;         
@@ -60,7 +60,6 @@ typedef struct {
 typedef enum {
     ALERT_TYPE_NONE = 0,
     ALERT_TYPE_EBBL = 1,
-    ALERT_TYPE_IMA  = 2,
 } alert_type_t;
 
 typedef enum {
@@ -74,7 +73,6 @@ typedef struct {
     alert_type_t  type;
     alert_level_t level;
     float         ttc_s;    
-    float         delta_t_s; 
     float         dist_m;   
     uint8_t       peer_id[4];
     int           n_peers;    

@@ -120,10 +120,3 @@
 #define CFG_EBBL_BURST_COUNT    3      
 #define CFG_EBBL_BURST_MS       20      
 #define CFG_EBBL_COOLDOWN_MS    500  
-
-// IMA
-#define CFG_IMA_RADIUS_M        80.0f  
-#define CFG_IMA_ANGLE_MIN_DEG   45.0f  
-#define CFG_IMA_ANGLE_MAX_DEG   135.0f  
-#define CFG_IMA_DT_CRIT_S       1.0f   
-#define CFG_IMA_DT_WARN_S       2.5f

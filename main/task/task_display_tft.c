@@ -152,18 +152,13 @@ static void draw_footer(void)
 
         /* Alert type name */
         const char *name = (s_alert.type == ALERT_TYPE_EBBL) ? "PHANH GAP!" :
-                           (s_alert.type == ALERT_TYPE_IMA)  ? "GIAO LO!"   :
                                                                "CAUTION";
         tft_draw_str(4, FOOTER_Y + 2, name, TFT_WHITE, bg, 2);
 
         /* Metric */
         char mbuf[20];
-        if (s_alert.type == ALERT_TYPE_EBBL)
-            snprintf(mbuf, sizeof(mbuf), "TTC %.1fs %.0fm",
-                     s_alert.ttc_s, s_alert.dist_m);
-        else
-            snprintf(mbuf, sizeof(mbuf), "dT  %.1fs %.0fm",
-                     s_alert.delta_t_s, s_alert.dist_m);
+        snprintf(mbuf, sizeof(mbuf), "TTC %.1fs %.0fm",
+                 s_alert.ttc_s, s_alert.dist_m);
         tft_draw_str(4, FOOTER_Y + 20, mbuf, TFT_WHITE, bg, 1);
 
     } else {
