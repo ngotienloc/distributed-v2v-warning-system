@@ -24,7 +24,6 @@ static uint32_t now_ms(void)
 void task_collision(void *arg)
 {
     collision_input_t ci;
-    alert_result_t    result;
 
     ESP_LOGI(TAG, "started — q_collision_in -> EBBL -> q_alert_tft");
 
