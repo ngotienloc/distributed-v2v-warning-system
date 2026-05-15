@@ -53,4 +53,14 @@ void dr_reset_from_gps(dr_state_t *dr, float x_gps,float y_gps, float speed,floa
     dr->vy = speed * cosf(heading);
 }
 
+/* [Fix #4] Exponential velocity decay when GPS lost — prevents unbounded IMU drift.
+ * decay_per_s = 0.3 => velocity reduced by 30%/s (gentle), stops accumulating error. */
+void dr_apply_velocity_decay(dr_state_t *dr, float decay_per_s, float dt)
+{
+    float factor = 1.0f - decay_per_s * dt;
+    if (factor < 0.0f) factor = 0.0f;
+    dr->vx *= factor;
+    dr->vy *= factor;
+}
+
 

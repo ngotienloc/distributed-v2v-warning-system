@@ -152,6 +152,7 @@ static void draw_footer(void)
 
         /* Alert type name */
         const char *name = (s_alert.type == ALERT_TYPE_EBBL) ? "PHANH GAP!" :
+                           (s_alert.type == ALERT_TYPE_TTC)  ? "VA CHAM!"   :
                                                                "CAUTION";
         tft_draw_str(4, FOOTER_Y + 2, name, TFT_WHITE, bg, 2);
 

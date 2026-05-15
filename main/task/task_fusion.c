@@ -10,6 +10,10 @@
 
 static const char *TAG = "task_fusion";
 
+/* [Small fix] Cache of last valid GPS fix — sent downstream every cycle
+ * so task_localization always has a reference position even when GPS quiet. */
+static gps_data_t s_last_valid_gps = {0};
+
 static uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -49,13 +53,11 @@ void task_fusion(void *arg)
             }
         }
         bool gps_updated = false;
-        gps_data_t latest_gps;
-        memset(&latest_gps, 0, sizeof(latest_gps));
 
         while (xQueueReceive(q_gps, &gps, 0) == pdTRUE) {
             if (!gps.valid) continue;
             imu_filter_fuse_gps_heading(&cf, gps.course, gps.speed);
-            latest_gps  = gps;
+            s_last_valid_gps = gps;   /* [Small fix] cache last good fix */
             gps_updated = true;
         }
 
@@ -65,7 +67,7 @@ void task_fusion(void *arg)
         out.accel_x_lin    = cf.accel_x_lin;
         out.accel_y_lin    = cf.accel_y_lin;
         out.dt             = imu.dt;
-        out.gps            = latest_gps;
+        out.gps            = s_last_valid_gps;  /* always send last known fix */
         out.gps_updated    = gps_updated;
 
         fusion_output_t stale;

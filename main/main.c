@@ -73,7 +73,7 @@ void app_main(void)
                              "gps",
                              CFG_STACK_GPS,
                              NULL, CFG_PRIO_GPS, NULL,
-                             CFG_CORE_GPS);
+                        7     CFG_CORE_GPS);
 
     xTaskCreatePinnedToCore(task_fusion,
                              "fusion",

@@ -29,6 +29,94 @@ static uint32_t now_ms(void)
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
+/* ── UBX protocol helpers ─────────────────────────────────────────────
+ * NEO-6M uses u-blox Binary Protocol (UBX) for configuration.
+ * Frame: 0xB5 0x62 | class | id | len_lo len_hi | payload | CK_A CK_B
+ * Checksum = Fletcher-8 over (class, id, len_lo, len_hi, payload[]).
+ * ──────────────────────────────────────────────────────────────────── */
+static void ubx_send(uint8_t cls, uint8_t id,
+                     const uint8_t *payload, uint16_t pay_len)
+{
+    uint8_t ck_a = 0, ck_b = 0;
+    uint8_t len_lo = (uint8_t)(pay_len & 0xFF);
+    uint8_t len_hi = (uint8_t)(pay_len >> 8);
+
+    /* Compute Fletcher-8 checksum */
+#define CK(b) do { ck_a += (b); ck_b += ck_a; } while(0)
+    CK(cls); CK(id); CK(len_lo); CK(len_hi);
+    for (uint16_t i = 0; i < pay_len; i++) CK(payload[i]);
+#undef CK
+
+    const uint8_t hdr[6]  = { 0xB5, 0x62, cls, id, len_lo, len_hi };
+    const uint8_t tail[2] = { ck_a, ck_b };
+    uart_write_bytes(CFG_GPS_UART_PORT, (const char *)hdr,     sizeof(hdr));
+    uart_write_bytes(CFG_GPS_UART_PORT, (const char *)payload, pay_len);
+    uart_write_bytes(CFG_GPS_UART_PORT, (const char *)tail,    sizeof(tail));
+}
+
+/* Disable one NMEA sentence on UART1 output (rate = 0)
+ * cls/id: e.g. 0xF0/0x00 = GGA, 0xF0/0x01 = GLL, etc. */
+static void ubx_disable_nmea(uint8_t nmea_cls, uint8_t nmea_id)
+{
+    /* CFG-MSG (8-byte form): msgClass, msgID, rate[6] (I2C,UART1,UART2,USB,SPI,res) */
+    const uint8_t payload[8] = { nmea_cls, nmea_id, 0, 0, 0, 0, 0, 0 };
+    ubx_send(0x06, 0x01, payload, sizeof(payload));
+    vTaskDelay(pdMS_TO_TICKS(30));
+}
+
+/* Configure NEO-6M for 5 Hz operation:
+ *  1. Switch module baud to CFG_GPS_UART_BAUD (38400) via UBX-CFG-PRT
+ *  2. Disable unused NMEA sentences (GGA, GLL, GSA, GSV, VTG)
+ *  3. Set 5 Hz nav rate via UBX-CFG-RATE
+ * NOTE: Called while ESP32 UART is still at CFG_GPS_UART_BAUD_BOOT (9600). */
+static void gps_neo6m_configure(void)
+{
+    /* ── Step 1: Tell NEO-6M to switch to 38400 baud ────────────────
+     * UBX-CFG-PRT (portID=1 = UART1), 20-byte payload.
+     * mode=0x000008C0 = 8N1, inProto=7 (UBX+NMEA), outProto=3 (UBX+NMEA) */
+    const uint8_t cfg_prt[20] = {
+        0x01,                          /* portID = UART1              */
+        0x00,                          /* reserved1                   */
+        0x00, 0x00,                    /* txReady = disabled          */
+        0xC0, 0x08, 0x00, 0x00,       /* mode = 8N1                  */
+        /* baudRate = 38400 = 0x9600 in little-endian */
+        0x00, 0x96, 0x00, 0x00,
+        0x07, 0x00,                    /* inProtoMask = UBX+NMEA+RTCM */
+        0x03, 0x00,                    /* outProtoMask = UBX+NMEA     */
+        0x00, 0x00,                    /* flags                       */
+        0x00, 0x00,                    /* reserved2                   */
+    };
+    ubx_send(0x06, 0x00, cfg_prt, sizeof(cfg_prt));
+    /* Wait for NEO-6M to apply baud change, then switch ESP32 UART */
+    vTaskDelay(pdMS_TO_TICKS(100));
+    uart_set_baudrate(CFG_GPS_UART_PORT, CFG_GPS_UART_BAUD);
+    uart_flush_input(CFG_GPS_UART_PORT);
+    ESP_LOGI(TAG, "NEO-6M baud -> %d", CFG_GPS_UART_BAUD);
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    /* ── Step 2: Disable unused NMEA output sentences ────────────────
+     * Keep only RMC (class F0 ID 04) which carries lat/lon/speed/hdg.
+     * This reduces UART load from ~8 sentences/s to 5 RMC/s. */
+    ubx_disable_nmea(0xF0, 0x00);   /* GGA  */
+    ubx_disable_nmea(0xF0, 0x01);   /* GLL  */
+    ubx_disable_nmea(0xF0, 0x02);   /* GSA  */
+    ubx_disable_nmea(0xF0, 0x03);   /* GSV  */
+    ubx_disable_nmea(0xF0, 0x05);   /* VTG  */
+    ESP_LOGI(TAG, "NEO-6M: GGA/GLL/GSA/GSV/VTG disabled, RMC only");
+
+    /* ── Step 3: Set 5 Hz navigation rate ────────────────────────────
+     * UBX-CFG-RATE: measRate=200ms, navRate=1, timeRef=1 (GPS) */
+    const uint8_t cfg_rate[6] = {
+        0xC8, 0x00,   /* measRate = 200 ms (5 Hz) */
+        0x01, 0x00,   /* navRate  = 1             */
+        0x01, 0x00,   /* timeRef  = GPS time      */
+    };
+    ubx_send(0x06, 0x08, cfg_rate, sizeof(cfg_rate));
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ESP_LOGI(TAG, "NEO-6M: rate set to %d Hz (measRate=200ms)", CFG_GPS_RATE_HZ);
+}
+
+
 static float parse_coord(const char *field, char dir)
 {
     if (!field || field[0] == '\0') return 0.0f;
@@ -86,34 +174,38 @@ static void process_sentence(const char *sentence){
     if (is_rmc && nf >= 9) {
         // Field[2] = 'A' (active) required 
         if (f[2][0] != 'A') return;
-        s_last_fix.lat         = parse_coord(f[3], f[4][0]);
-        s_last_fix.lon         = parse_coord(f[5], f[6][0]);
-        s_last_fix.speed_ms    = strtof(f[7], NULL) * 0.51444f; /* knots->m/s */
-        s_last_fix.heading_rad = strtof(f[8], NULL) * (float)M_PI / 180.0f;
+        s_last_fix.lat          = parse_coord(f[3], f[4][0]);
+        s_last_fix.lon          = parse_coord(f[5], f[6][0]);
+        s_last_fix.speed_ms     = strtof(f[7], NULL) * 0.51444f; /* knots->m/s */
+        s_last_fix.heading_rad  = strtof(f[8], NULL) * (float)M_PI / 180.0f;
         s_last_fix.nmea_time_ms = parse_utc_ms(f[1]);
+
+        /* RMC mang đủ thông tin (lat/lon/speed/heading) — trigger callback */
+        uint32_t t          = now_ms();
+        s_last_fix.valid        = true;
+        s_last_fix.timestamp_ms = t;
+        s_has_fix               = true;
+        s_fix_ms                = t;
+
+        if (s_cb) s_cb(&s_last_fix, s_cb_ctx);
+
+        ESP_LOGD(TAG, "RMC fix lat=%.6f lon=%.6f spd=%.2f hdg=%.1f°",
+                 s_last_fix.lat, s_last_fix.lon,
+                 s_last_fix.speed_ms,
+                 s_last_fix.heading_rad * 180.0f / (float)M_PI);
+
     } else if (is_gga && nf >= 7) {
-        //Field[6] = fix quality, 0 = no fix 
+        /* GGA không mang speed/heading — chỉ cập nhật lat/lon nội bộ,
+         * KHÔNG gọi callback (tránh gửi speed/heading cũ bị trễ 1 giây). */
         if (atoi(f[6]) == 0) return;
         s_last_fix.lat          = parse_coord(f[2], f[3][0]);
         s_last_fix.lon          = parse_coord(f[4], f[5][0]);
         s_last_fix.nmea_time_ms = parse_utc_ms(f[1]);
-        // GGA does not carry speed/heading - keep previous values 
+        ESP_LOGV(TAG, "GGA lat=%.6f lon=%.6f (no callback)",
+                 s_last_fix.lat, s_last_fix.lon);
     } else {
         return;
     }
-
-    uint32_t t          = now_ms();
-    s_last_fix.valid        = true;
-    s_last_fix.timestamp_ms = t;
-    s_has_fix               = true;
-    s_fix_ms                = t;
-
-    if (s_cb) s_cb(&s_last_fix, s_cb_ctx);
-
-    ESP_LOGD(TAG, "FIX lat=%.6f lon=%.6f spd=%.2f hdg=%.1f°",
-             s_last_fix.lat, s_last_fix.lon,
-             s_last_fix.speed_ms,
-             s_last_fix.heading_rad * 180.0f / (float)M_PI);
 }
 
 static void uart_reader_task(void *arg)
@@ -186,9 +278,9 @@ esp_err_t gps_init(void)
     s_sentence_q = xQueueCreate(CFG_GPS_SENTENCE_QLEN, NMEA_MAX_LEN + 1);
     if (!s_sentence_q) return ESP_ERR_NO_MEM;
 
-    /* UART config */
-    const uart_config_t ucfg = {
-        .baud_rate  = CFG_GPS_UART_BAUD,
+    /* ── Step A: Init UART at boot baud (9600) to send UBX config ── */
+    uart_config_t ucfg = {
+        .baud_rate  = CFG_GPS_UART_BAUD_BOOT,   /* 9600 — NEO-6M default */
         .data_bits  = UART_DATA_8_BITS,
         .parity     = UART_PARITY_DISABLE,
         .stop_bits  = UART_STOP_BITS_1,
@@ -204,6 +296,11 @@ esp_err_t gps_init(void)
                                          0, 16,
                                          &s_uart_evt_q, 0));
 
+    /* ── Step B: Send UBX commands to configure NEO-6M ── */
+    vTaskDelay(pdMS_TO_TICKS(200));   /* Wait for module to be ready */
+    gps_neo6m_configure();            /* baud->38400, RMC-only, 5Hz  */
+
+    /* ── Step C: Start reader and parse tasks ── */
     xTaskCreatePinnedToCore(uart_reader_task, "gps_rd",
                             3072, NULL, CFG_PRIO_GPS + 1,
                             &s_reader_task, CFG_CORE_GPS);
@@ -211,7 +308,8 @@ esp_err_t gps_init(void)
                             3072, NULL, CFG_PRIO_GPS,
                             &s_parse_task, CFG_CORE_GPS);
 
-    ESP_LOGI(TAG, "GPS init OK (UART%d baud=%d RX=%d)",
-             CFG_GPS_UART_PORT, CFG_GPS_UART_BAUD, CFG_GPS_UART_RX_PIN);
+    ESP_LOGI(TAG, "GPS init OK (UART%d baud=%d RX=%d rate=%dHz)",
+             CFG_GPS_UART_PORT, CFG_GPS_UART_BAUD,
+             CFG_GPS_UART_RX_PIN, CFG_GPS_RATE_HZ);
     return ESP_OK;
 }

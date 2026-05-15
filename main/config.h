@@ -12,11 +12,13 @@
 
 // GPS
 #define CFG_GPS_UART_PORT       UART_NUM_1
-#define CFG_GPS_UART_TX_PIN     17    
-#define CFG_GPS_UART_RX_PIN     18    
-#define CFG_GPS_UART_BAUD       9600
+#define CFG_GPS_UART_TX_PIN     17
+#define CFG_GPS_UART_RX_PIN     18
+#define CFG_GPS_UART_BAUD       38400   /* Tăng từ 9600 — cần thiết cho 5 Hz (RMC ~70B×5 = 350B/s) */
+#define CFG_GPS_UART_BAUD_BOOT  9600    /* NEO-6M khởi động mặc định 9600 — dùng lúc init UBX */
 #define CFG_GPS_UART_BUF        512
-#define CFG_GPS_SENTENCE_QLEN   4    
+#define CFG_GPS_SENTENCE_QLEN   8       /* Tăng từ 4 — buffer đủ cho 5 RMC/s */
+#define CFG_GPS_RATE_HZ         5       /* NEO-6M update rate (UBX-CFG-RATE 200ms) */
 
 // IMU
 #define CFG_IMU_I2C_PORT        I2C_NUM_0
@@ -84,8 +86,11 @@
 // V2V
 #define CFG_ESPNOW_CHANNEL      1
 #define CFG_ESPNOW_BCAST        {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF}
-#define CFG_PKT_STALE_MS        500  
-#define CFG_PKT_MAGIC           0xB6 
+#define CFG_PKT_STALE_MS        1000  /* Tăng 500→1000ms: giảm false evict khi ESP-NOW nhiễu */
+#define CFG_PKT_MAGIC           0xB6
+
+// GPS staleness — sau khoảng này không có fix mới, coi GPS mất tín hiệu
+#define CFG_GPS_STALE_MS        800   /* 5Hz → 200ms/fix. 800ms = 4 fix missed liên tiếp */
 
 // Accel ±8g range
 #define CFG_ACCEL_SCALE         (1.0f / 4096.0f * 9.81f)

@@ -60,6 +60,7 @@ typedef struct {
 typedef enum {
     ALERT_TYPE_NONE = 0,
     ALERT_TYPE_EBBL = 1,
+    ALERT_TYPE_TTC  = 2,   /* TTC proximity warning (xe phía trước dừng, không cần phanh gấp) */
 } alert_type_t;
 
 typedef enum {
@@ -90,6 +91,7 @@ typedef struct __attribute__((packed)) {
     uint8_t  alert_type;
     uint8_t  alert_level;
     uint32_t nmea_time_ms;
+    uint8_t  gps_valid;    /* 1 = GPS fix hợp lệ, 0 = mất GPS (dùng DR) */
 } v2v_packet_t;
 
 #define COLLISION_MAX_PEERS  16
