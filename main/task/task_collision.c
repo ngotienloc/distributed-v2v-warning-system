@@ -44,12 +44,11 @@ void task_collision(void *arg)
             continue;
         }
 
-        /* ── 3. Estimate ego's current UTC (for network delay comp.) */
-        uint32_t cur_utc_ms = 0;
-        if (ci.ego.nmea_time_ms > 0) {
-            uint32_t elapsed = now_ms() - ci.ego.local_ts_ms;
-            cur_utc_ms = ci.ego.nmea_time_ms + elapsed;
-        }
+        /* ── 3. [Fix #1] esp_timer timestamp hiện tại — ms precision
+         *     Dùng để tính age của peer packet.
+         *     Cả cur_esp_ms và peer.update_ts_ms đều là esp_timer của EGO
+         *     → không cần đồng bộ đồng hồ với xe peer.              */
+        uint32_t cur_esp_ms = now_ms();
 
         /* ── 4. Evaluate each peer ─────────────────────────────── */
         alert_result_t best = {0};
@@ -71,19 +70,17 @@ void task_collision(void *arg)
                                peer.lat, peer.lon,
                                &px, &py);
 
-            /* 4b. Network latency compensation:
-             *     Extrapolate peer from its GPS timestamp to now using
-             *     dead reckoning: x += v*sin(h)*dt, y += v*cos(h)*dt.
-             *     Handles UTC midnight wrap (±12h window).             */
-            if (cur_utc_ms > 0 && peer.nmea_time_ms > 0) {
-                int32_t diff = (int32_t)cur_utc_ms - (int32_t)peer.nmea_time_ms;
-                if (diff >  43200000) diff -= 86400000;   /* wrap forward  */
-                if (diff < -43200000) diff += 86400000;   /* wrap backward */
-                if (diff > 0) {
-                    float dt_net = diff * 0.001f;
-                    px += peer.velocity * sinf(peer.heading) * dt_net;
-                    py += peer.velocity * cosf(peer.heading) * dt_net;
-                }
+            /* 4b. [Fix #1] Dead reckoning bù trễ mạng — esp_timer precision
+             *     peer.update_ts_ms = esp_timer của EGO lúc nhận packet
+             *                         (gán trong packet_deserialize).
+             *     age_ms = thời gian packet nằm trong queue + xử lý (~70ms).
+             *     Trước: dùng nmea_time_ms (GPS 1Hz) → sai đến ±1000ms = ±16m @60km/h
+             *     Sau:   dùng esp_timer (1ms)        → sai ~70ms        = ~1.2m @60km/h */
+            uint32_t age_ms = cur_esp_ms - peer.update_ts_ms;
+            if (age_ms > 0 && age_ms <= CFG_PKT_STALE_MS) {
+                float dt_net = age_ms * 0.001f;
+                px += peer.velocity * sinf(peer.heading) * dt_net;
+                py += peer.velocity * cosf(peer.heading) * dt_net;
             }
 
             peer.x = px;
