@@ -61,7 +61,6 @@ void task_localization(void *arg)
             ego.lat          = fused.gps.latitude;
             ego.lon          = fused.gps.longitude;
             ego.gps_valid    = true;
-            ego.nmea_time_ms = fused.gps.nmea_time_ms;
             ego.local_ts_ms  = fused.gps.timestamp_ms;  /* timestamp of last valid fix */
 
             ESP_LOGD(TAG, "GPS reset: lat=%.6f lon=%.6f spd=%.1fkm/h age=%.0fms",

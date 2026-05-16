@@ -24,7 +24,6 @@ static void on_fix(const gps_fix_t *fix, void *ctx)
         .course       = fix->heading_rad,
         .valid        = fix->valid,
         .timestamp_ms = fix->timestamp_ms,
-        .nmea_time_ms = fix->nmea_time_ms,
     };
 
     if (xQueueSend(q_gps, &msg, 0) != pdTRUE) {

@@ -28,7 +28,6 @@ void packet_serialize(const vehicle_state_t *self,
     out->gyro_z       = self->gyro_z;
     out->alert_type   = (uint8_t)alert_type;
     out->alert_level  = (uint8_t)alert_level;
-    out->nmea_time_ms = self->nmea_time_ms;
     out->gps_valid    = self->gps_valid ? 1u : 0u;  /* [Fix #3] gửi trạng thái GPS thực sự */
 }
 
@@ -47,7 +46,6 @@ bool packet_deserialize(const v2v_packet_t *pkt, vehicle_state_t *out)
     out->heading      = pkt->heading;
     out->accel_x_lin  = pkt->accel_x_lin;
     out->gyro_z       = pkt->gyro_z;
-    out->nmea_time_ms = pkt->nmea_time_ms;
     out->gps_valid    = (pkt->gps_valid != 0);  /* [Fix #3] đọc trực tiếp từ packet */
     out->update_ts_ms = now_ms();
     // x, y = 0; collision_task computes from GPS lat/lon via geo_utils 

@@ -19,7 +19,6 @@ typedef struct {
     float course; //heading
     bool  valid;  //checking 
     uint32_t timestamp_ms; 
-    uint32_t nmea_time_ms; 
 }gps_data_t; 
 
 typedef struct {
@@ -51,7 +50,6 @@ typedef struct {
     float    accel_x_lin;  
     float    gyro_z;        
     bool     gps_valid;
-    uint32_t nmea_time_ms; 
     uint32_t local_ts_ms;
     uint32_t update_ts_ms; 
 } vehicle_state_t;
@@ -90,7 +88,6 @@ typedef struct __attribute__((packed)) {
     float    gyro_z;
     uint8_t  alert_type;
     uint8_t  alert_level;
-    uint32_t nmea_time_ms;
     uint8_t  gps_valid;    /* 1 = GPS fix hợp lệ, 0 = mất GPS (dùng DR) */
 } v2v_packet_t;
 

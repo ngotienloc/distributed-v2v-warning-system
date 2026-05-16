@@ -10,7 +10,6 @@ typedef struct {
     float heading_rad; 
     bool valid; 
     uint32_t timestamp_ms; 
-    uint32_t nmea_time_ms;
 }gps_fix_t; 
 
 // Call back gps to task 

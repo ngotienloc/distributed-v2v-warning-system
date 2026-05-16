@@ -178,7 +178,6 @@ static void process_sentence(const char *sentence){
         s_last_fix.lon          = parse_coord(f[5], f[6][0]);
         s_last_fix.speed_ms     = strtof(f[7], NULL) * 0.51444f; /* knots->m/s */
         s_last_fix.heading_rad  = strtof(f[8], NULL) * (float)M_PI / 180.0f;
-        s_last_fix.nmea_time_ms = parse_utc_ms(f[1]);
 
         /* RMC mang đủ thông tin (lat/lon/speed/heading) — trigger callback */
         uint32_t t          = now_ms();
@@ -200,7 +199,6 @@ static void process_sentence(const char *sentence){
         if (atoi(f[6]) == 0) return;
         s_last_fix.lat          = parse_coord(f[2], f[3][0]);
         s_last_fix.lon          = parse_coord(f[4], f[5][0]);
-        s_last_fix.nmea_time_ms = parse_utc_ms(f[1]);
         ESP_LOGV(TAG, "GGA lat=%.6f lon=%.6f (no callback)",
                  s_last_fix.lat, s_last_fix.lon);
     } else {
