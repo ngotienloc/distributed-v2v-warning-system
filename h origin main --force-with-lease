@@ -1,0 +1,38 @@
+* [33m8920363[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m feat: implement core V2V system architecture, hardware configuration, and GPS communication drivers
+* [33mf844575[m feat: add passive buzzer driver and integrate alert functionality
+[31m|[m * [33m57f8d70[m[33m ([m[1;31morigin/main[m[33m)[m remove nmeatime
+[31m|[m * [33m4127fe6[m feat: implement velocity decay for dead reckoning and enhance GPS handling in V2V packets
+[31m|[m * [33m6b6058d[m fix: improve timestamp precision for network latency compensation in collision detection
+[31m|[m * [33m2ece0e3[m fix
+[31m|[m * [33m99efb84[m refactor: remove Intersection Movement Assist (IMA) functionality and related configurations
+[31m|[m[31m/[m  
+* [33mdc20c13[m feat: implement IMU complementary filter, collision detection task, and V2V packet handling logic
+* [33mfda00cf[m feat: enhance V2V task with broadcast and RX processing logic
+[32m|[m * [33md7e3492[m[33m ([m[1;31morigin/collision[m[33m, [m[1;32mcollision[m[33m)[m test ebbl
+[32m|[m[32m/[m  
+* [33m0ad6168[m feat: implement collision detection system including EBBL/IMA algorithms and task management infrastructure
+* [33mae861b1[m add EBBL evaluation logic and collision task implementation
+* [33mc6508ef[m[33m ([m[1;31morigin/v2v[m[33m, [m[1;32mv2v[m[33m)[m add V2V communication and localization modules with necessary configurations and data structures
+* [33m976488d[m add task to active algo in and task localization for dead reckoning
+*   [33m5319f22[m geo_utils
+[34m|[m[35m\[m  
+* [35m|[m [33m73f7c56[m  ok
+* [35m|[m [33m773a39a[m add heading complementary
+* [35m|[m   [33m0baf87a[m resolve merge algo into main
+[36m|[m[1;31m\[m [35m\[m  
+* [1;31m|[m [35m|[m [33mae11e72[m Revert main.c and test case from main
+[1;31m|[m [1;31m|[m [35m|[m * [33m6e0463e[m[33m ([m[1;31morigin/algo[m[33m, [m[1;32malgo[m[33m)[m localization
+[1;31m|[m [1;31m|[m [35m|[m[35m/[m  
+[1;31m|[m [1;31m|[m * [33mb1a73dd[m add dead reckoning and geo_utils modules with necessary functions and configurations
+[1;31m|[m [1;31m|[m[1;31m/[m  
+[1;31m|[m * [33m3dcdb42[m add complementary filter (heading imu and heading gps)
+[1;31m|[m * [33m95ad050[m add img
+[1;31m|[m[1;31m/[m  
+* [33mf909c89[m test_pitch_roll complementary filter
+* [33mb8d4817[m reset main
+* [33m11806a6[m[33m ([m[1;31morigin/test/mpu[m[33m, [m[1;32mtest/mpu[m[33m)[m test_mpu6050
+* [33mdbd3b5d[m GPS driver
+* [33m2361c3c[m[33m ([m[1;31morigin/test/gps[m[33m, [m[1;32mtest/gps[m[33m)[m Add GPS to test log
+* [33md202f0e[m Add GPS to test log
+* [33m1c9f8ca[m Add GPS to test log
+* [33md0c4005[m add readme to project
