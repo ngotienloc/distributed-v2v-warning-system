@@ -1,3 +1,12 @@
+/* main.c — Điểm khởi động hệ thống V2V
+ *
+ * Luồng khởi tạo:
+ *   NVS → Event Loop → Queues/EventGroup → Hardware (IMU, GPS) → ESP-NOW → Tasks
+ *
+ * Pipeline FreeRTOS (IMU → Fusion → Localization → V2V → Collision → TFT):
+ *   task_imu  →(q_imu)→  task_fusion  →(q_fusion_out)→  task_localization
+ *   →(q_ego_state)→  task_v2v  →(q_collision_in)→  task_collision  →(q_alert_tft)→  task_display_tft
+ */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -12,14 +21,14 @@
 
 static const char *TAG = "main";
 
-/* ── Forward declarations of task entry points ─────────────────── */
+/* ── Khai báo trước các hàm task entry ────────────────────────────────── */
 void task_imu         (void *arg);
 void task_gps         (void *arg);
 void task_fusion      (void *arg);
 void task_localization(void *arg);
 void task_v2v         (void *arg);
 void task_collision   (void *arg);
-void task_display_tft (void *arg);   /* TFT visualization */
+void task_display_tft (void *arg);
 
 void app_main(void)
 {
@@ -28,9 +37,7 @@ void app_main(void)
     ESP_LOGI(TAG, "  Queue-based pipeline architecture");
     ESP_LOGI(TAG, "═══════════════════════════════════════════");
 
-
-
-    /* ── 1. NVS ─────────────────────────────────────────────────── */
+    /* ── 1. Khởi tạo NVS (lưu calibration IMU) ───────────────────────── */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
         ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -39,28 +46,25 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    /* ── 2. Event loop (before WiFi / ESP-NOW) ───────────────────── */
+    /* ── 2. Event loop (cần trước khi init WiFi / ESP-NOW) ────────────── */
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    /* ── 3. Queue + EventGroup init ─────────────────────────────── */
-
+    /* ── 3. Tạo tất cả queue + EventGroup ─────────────────────────────── */
     ESP_ERROR_CHECK(app_queues_init());
 
-    /* ── 4. Hardware drivers ─────────────────────────────────────── */
+    /* ── 4. Khởi tạo phần cứng ────────────────────────────────────────── */
     ESP_LOGI(TAG, "Initializing hardware drivers...");
     ESP_ERROR_CHECK(mpu_init());
-    ESP_ERROR_CHECK(mpu_calibrate());  /* ~3 s stationary calibration */
+    ESP_ERROR_CHECK(mpu_calibrate());  /* ~3 s, yêu cầu xe đứng yên */
     ESP_ERROR_CHECK(gps_init());
 
-    /* ── 5. V2V communication layer ─────────────────────────────── */
+    /* ── 5. Khởi tạo lớp V2V (ESP-NOW broadcast) ──────────────────────── */
     ESP_ERROR_CHECK(espnow_init(q_v2v_rx));
 
-    /* ── 6. Neighbor table (used internally by task_v2v only) ────── */
+    /* ── 6. Khởi tạo bảng xe lân cận ─────────────────────────────────── */
     ntable_init();
 
-    /* ── 7. Create tasks in pipeline order ──────────────────────── *
-     * Order does not matter for correctness (queues decouple timing)
-     * but aligns with the pipeline for clarity.                     */
+    /* ── 7. Tạo 7 task theo thứ tự pipeline ──────────────────────────── */
     ESP_LOGI(TAG, "Creating task pipeline...");
 
     xTaskCreatePinnedToCore(task_imu,
@@ -73,7 +77,7 @@ void app_main(void)
                              "gps",
                              CFG_STACK_GPS,
                              NULL, CFG_PRIO_GPS, NULL,
-                        7     CFG_CORE_GPS);
+                             CFG_CORE_GPS);
 
     xTaskCreatePinnedToCore(task_fusion,
                              "fusion",
@@ -81,7 +85,7 @@ void app_main(void)
                              NULL, CFG_PRIO_FUSION, NULL,
                              CFG_CORE_FUSION);
 
-    xTaskCreatePinnedToCore(task_localization,       /* NEW */
+    xTaskCreatePinnedToCore(task_localization,
                              "localize",
                              CFG_STACK_LOCALIZATION,
                              NULL, CFG_PRIO_LOCALIZATION, NULL,
@@ -106,6 +110,5 @@ void app_main(void)
                              CFG_CORE_DISPLAY_TFT);
 
     ESP_LOGI(TAG, "All 7 tasks created — FreeRTOS scheduler running.");
-    /* app_main returns; FreeRTOS scheduler takes control. */
-
+    /* app_main trả về; FreeRTOS scheduler tiếp quản. */
 }

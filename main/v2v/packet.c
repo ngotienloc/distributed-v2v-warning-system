@@ -1,3 +1,4 @@
+/* v2v/packet.c — Triển khai serialize/deserialize gói tin V2V. */
 #include "packet.h"
 #include "esp_timer.h"
 #include "config.h"
@@ -8,11 +9,14 @@ static uint32_t now_ms(void)
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
+/* Kiểm tra magic byte (nhanh, không parse toàn bộ gói) */
 bool packet_is_valid(const v2v_packet_t *pkt)
 {
     return pkt && pkt->magic == CFG_PKT_MAGIC;
 }
 
+/* Đóng gói vehicle_state_t → v2v_packet_t để truyền qua không dây.
+ * Lưu ý: wire field 'speed' ↔ state field 'velocity'. */
 void packet_serialize(const vehicle_state_t *self,
                       alert_type_t           alert_type,
                       alert_level_t          alert_level,
@@ -22,33 +26,32 @@ void packet_serialize(const vehicle_state_t *self,
     memcpy(out->id, self->id, 4);
     out->lat          = self->lat;
     out->lon          = self->lon;
-    out->speed        = self->velocity;   /* wire field 'speed' <- state field 'velocity' */
+    out->speed        = self->velocity;     /* vehicle_state.velocity → packet.speed */
     out->heading      = self->heading;
     out->accel_x_lin  = self->accel_x_lin;
     out->gyro_z       = self->gyro_z;
     out->alert_type   = (uint8_t)alert_type;
     out->alert_level  = (uint8_t)alert_level;
-    out->gps_valid    = self->gps_valid ? 1u : 0u;  /* [Fix #3] gửi trạng thái GPS thực sự */
+    out->gps_valid    = self->gps_valid ? 1u : 0u;
 }
 
+/* Giải gói v2v_packet_t → vehicle_state_t.
+ * update_ts_ms = now_ms() để task_collision tính tuổi packet chính xác.
+ * x, y = 0 — task_collision sẽ tính từ lat/lon qua geo_utils. */
 bool packet_deserialize(const v2v_packet_t *pkt, vehicle_state_t *out)
 {
     if (!packet_is_valid(pkt)) return false;
-
-    /* NOTE: stale check is handled by neighbor_table via update_ts_ms.
-     * Here we only populate vehicle_state_t from the wire packet. */
 
     memset(out, 0, sizeof(*out));
     memcpy(out->id, pkt->id, 4);
     out->lat          = pkt->lat;
     out->lon          = pkt->lon;
-    out->velocity     = pkt->speed;   
+    out->velocity     = pkt->speed;         /* packet.speed → vehicle_state.velocity */
     out->heading      = pkt->heading;
     out->accel_x_lin  = pkt->accel_x_lin;
     out->gyro_z       = pkt->gyro_z;
-    out->gps_valid    = (pkt->gps_valid != 0);  /* [Fix #3] đọc trực tiếp từ packet */
-    out->update_ts_ms = now_ms();
-    // x, y = 0; collision_task computes from GPS lat/lon via geo_utils 
+    out->gps_valid    = (pkt->gps_valid != 0);
+    out->update_ts_ms = now_ms();           /* gán timestamp nhận gói = bây giờ */
+    /* x, y để lại = 0; sẽ được tính bởi task_collision */
     return true;
 }
-

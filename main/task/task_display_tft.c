@@ -1,3 +1,14 @@
+/* task/task_display_tft.c — Hiển thị radar V2V và cảnh báo lên màn hình TFT 128×160.
+ *
+ * Chạy ở 10 Hz. Mỗi frame:
+ *   1. Drain q_tft_collision → s_ci (danh sách ego + peers).
+ *   2. Drain q_alert_tft     → s_alert (cảnh báo hiện tại).
+ *   3. Vẽ: radar grid → peers → ego → status bar → footer cảnh báo.
+ *
+ * Bố cục màn hình:
+ *   [0..7px]   Status bar: GPS indicator | Speed | Peer count
+ *   [8..119px] Vùng radar: North=up, tỷ lệ 150m/56px
+ *   [120..159px] Footer: cảnh báo (màu đỏ/vàng/xanh) hoặc heading + "V2V READY" */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_queues.h"
@@ -11,41 +22,41 @@
 
 static const char *TAG = "task_tft";
 
-/* ── Radar geometry constants ──────────────────────────────── */
-#define RADAR_CX      64          /* center X (screen pixels) */
-#define RADAR_CY      64          /* center Y */
-#define RADAR_R       56          /* radar radius (px)         */
-#define RADAR_SCALE_M 150.0f      /* 150m ↔ RADAR_R px         */
+/* ── Hằng số hình học radar ──────────────────────────────────────────── */
+#define RADAR_CX      64          /* tâm radar X (px) */
+#define RADAR_CY      64          /* tâm radar Y (px) */
+#define RADAR_R       56          /* bán kính radar (px) */
+#define RADAR_SCALE_M 150.0f      /* 150m ↔ RADAR_R px */
 
-/* Convert ENU meters → screen pixels (North = up = -Y screen) */
+/* Chuyển ENU (m) → tọa độ màn hình (North = lên = -Y màn hình) */
 #define ENUx_TO_SCR(px) ((int)(RADAR_CX + (px) * RADAR_R / RADAR_SCALE_M))
 #define ENUy_TO_SCR(py) ((int)(RADAR_CY - (py) * RADAR_R / RADAR_SCALE_M))
 
-/* Screen area bounds */
+/* Phân vùng màn hình */
 #define STATUSBAR_H   8
 #define FOOTER_Y      120
 #define FOOTER_H      (CFG_TFT_HEIGHT - FOOTER_Y)  /* 40px */
 
-/* ── Internal state ─────────────────────────────────────────── */
-static collision_input_t s_ci   = {0};
-static alert_result_t    s_alert = {0};
+/* ── Trạng thái nội bộ ───────────────────────────────────────────────── */
+static collision_input_t s_ci          = {0};
+static alert_result_t    s_alert       = {0};
 static bool              s_alert_active = false;
-static uint32_t          s_alert_until  = 0;
+static uint32_t          s_alert_until  = 0;  /* hiển thị cảnh báo tối thiểu 2 giây */
 
 static uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
-/* ── Queue drain helpers ─────────────────────────────────────── */
+/* ── Drain queue, cập nhật state nội bộ ─────────────────────────────── */
 static void refresh_state(void)
 {
-    /* Drain q_tft_collision — dedicated copy for TFT, no race with collision task */
+    /* Drain q_tft_collision — bản sao riêng cho TFT, tránh race với collision task */
     collision_input_t tmp_ci;
     while (xQueueReceive(q_tft_collision, &tmp_ci, 0) == pdTRUE)
         s_ci = tmp_ci;
 
-    /* Drain alerts — take latest; activate display on real alert */
+    /* Drain alerts — giữ cảnh báo hiển thị tối thiểu 2 giây */
     alert_result_t tmp_al;
     while (xQueueReceive(q_alert_tft, &tmp_al, 0) == pdTRUE) {
         s_alert = tmp_al;
@@ -59,111 +70,99 @@ static void refresh_state(void)
         s_alert_active = false;
 }
 
-/* ── Rendering helpers ───────────────────────────────────────── */
-
-/* Peer dot color based on alert level */
+/* ── Màu chấm peer dựa theo mức cảnh báo ────────────────────────────── */
 static uint16_t peer_color(int peer_idx)
 {
-    /* If this peer is the one that triggered the active alert */
+    /* Peer là nguồn gây cảnh báo → tô màu theo mức */
     if (s_alert_active &&
         memcmp(s_ci.peers[peer_idx].id, s_alert.peer_id, 4) == 0) {
         return (s_alert.level == ALERT_LEVEL_CRITICAL) ? TFT_DOT_CRIT :
                (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_DOT_WARN :
-                                                         TFT_DOT_INFO;
+                                                          TFT_DOT_INFO;
     }
-    return TFT_DOT_SAFE;
+    return TFT_DOT_SAFE;  /* an toàn → xanh lá */
 }
 
-/* Draw ego vehicle: blue filled circle + heading arrow */
+/* Vẽ xe ego: hình tròn xanh + mũi tên hướng đi */
 static void draw_ego(float heading)
 {
     tft_fill_circle(RADAR_CX, RADAR_CY, 5, TFT_DOT_SELF);
 
-    /* Heading arrow: 12px line from center toward heading direction
-     * heading = 0 → North = up screen → −Y. CW positive. */
+    /* Mũi tên 12px theo hướng heading (CW từ North) */
     int ax = RADAR_CX + (int)(12.0f * sinf(heading));
     int ay = RADAR_CY - (int)(12.0f * cosf(heading));
     tft_draw_line(RADAR_CX, RADAR_CY, ax, ay, TFT_WHITE);
 }
 
-/* Draw one peer vehicle */
+/* Vẽ một xe peer: hình tròn + tick hướng */
 static void draw_peer(const vehicle_state_t *peer, uint16_t color)
 {
     int sx = ENUx_TO_SCR(peer->x);
     int sy = ENUy_TO_SCR(peer->y);
 
-    /* Clip to radar area */
+    /* Bỏ qua nếu ngoài vùng radar */
     if (sx < 0 || sx >= CFG_TFT_WIDTH) return;
     if (sy < STATUSBAR_H || sy >= FOOTER_Y) return;
 
-    /* Draw peer as small filled circle */
     tft_fill_circle(sx, sy, 4, color);
 
-    /* Heading tick */
     int tx = sx + (int)(8.0f * sinf(peer->heading));
     int ty = sy - (int)(8.0f * cosf(peer->heading));
     tft_draw_line(sx, sy, tx, ty, TFT_WHITE);
 }
 
-/* Draw radar grid: lightweight cross-hair (avoid heavy per-pixel rings) */
+/* Vẽ lưới radar: chữ thập + nhãn "N" */
 static void draw_radar_grid(void)
 {
-    /* Cross-hair */
     tft_draw_line(RADAR_CX, STATUSBAR_H,
                   RADAR_CX, FOOTER_Y - 1, TFT_RGB(25, 40, 55));
     tft_draw_line(0, RADAR_CY, CFG_TFT_WIDTH - 1,
                   RADAR_CY, TFT_RGB(25, 40, 55));
-
-    /* "N" label at top */
     tft_draw_char(RADAR_CX - 2, STATUSBAR_H + 1, 'N',
                   TFT_GRAY, TFT_BG_IDLE, 1);
 }
 
-/* Draw status bar (top 8px row) */
+/* Vẽ status bar (8px trên cùng): GPS LED | tốc độ | số peer */
 static void draw_statusbar(const vehicle_state_t *ego, int n_peers)
 {
     tft_fill_rect(0, 0, CFG_TFT_WIDTH, STATUSBAR_H, TFT_RGB(15, 25, 45));
 
-    /* GPS indicator */
+    /* Chỉ báo GPS: xanh = có fix, đỏ = mất GPS */
     uint16_t gps_col = ego->gps_valid ? TFT_RGB(0, 200, 80) :
                                         TFT_RGB(200, 50, 50);
     tft_fill_rect(1, 1, 5, 6, gps_col);
 
-    /* Speed */
     char buf[24];
-    int spd_kmh = (int)(ego->velocity * 3.6f);
-    snprintf(buf, sizeof(buf), "%3dkm/h", spd_kmh);
+    snprintf(buf, sizeof(buf), "%3dkm/h", (int)(ego->velocity * 3.6f));
     tft_draw_str(8, 1, buf, TFT_CYAN, TFT_RGB(15, 25, 45), 1);
 
-    /* Peer count */
     snprintf(buf, sizeof(buf), "N:%d", n_peers);
     tft_draw_str(CFG_TFT_WIDTH - 24, 1, buf,
                  TFT_DOT_SAFE, TFT_RGB(15, 25, 45), 1);
 }
 
-/* Draw footer (bottom 40px) — alert or idle */
+/* Vẽ footer (40px dưới cùng): cảnh báo hoặc heading + trạng thái */
 static void draw_footer(void)
 {
     if (s_alert_active) {
+        /* Nền màu theo mức cảnh báo */
         uint16_t bg = (s_alert.level == ALERT_LEVEL_CRITICAL) ? TFT_BG_CRIT :
                       (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_BG_WARN :
                                                                 TFT_BG_INFO;
         tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, FOOTER_H, bg);
 
-        /* Alert type name */
         const char *name = (s_alert.type == ALERT_TYPE_EBBL) ? "PHANH GAP!" :
                            (s_alert.type == ALERT_TYPE_TTC)  ? "VA CHAM!"   :
                                                                "CAUTION";
         tft_draw_str(4, FOOTER_Y + 2, name, TFT_WHITE, bg, 2);
 
-        /* Metric */
         char mbuf[20];
         snprintf(mbuf, sizeof(mbuf), "TTC %.1fs %.0fm",
                  s_alert.ttc_s, s_alert.dist_m);
         tft_draw_str(4, FOOTER_Y + 20, mbuf, TFT_WHITE, bg, 1);
 
     } else {
-        /* Idle footer: heading */
+        /* Idle: hiển thị heading và trạng thái hệ thống */
         tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, FOOTER_H, TFT_BG_IDLE);
         char buf[20];
         float hdg = s_ci.ego.heading * 57.2957795f;
@@ -174,38 +173,32 @@ static void draw_footer(void)
     }
 }
 
-/* ── Full frame render ───────────────────────────────────────── */
+/* ── Vẽ một frame hoàn chỉnh ────────────────────────────────────────── */
 static void render_frame(void)
 {
-    /* 1. Clear radar area only (avoid full clear → faster) */
+    /* Chỉ xóa vùng radar (tránh full-clear → nhanh hơn) */
     tft_fill_rect(0, STATUSBAR_H,
                   CFG_TFT_WIDTH, FOOTER_Y - STATUSBAR_H,
                   TFT_BG_IDLE);
 
-    /* 2. Radar grid */
     draw_radar_grid();
-    vTaskDelay(1); /* yield to IDLE to avoid WDT */
+    vTaskDelay(1);  /* yield để tránh WDT */
 
-    /* 3. Peer vehicles */
     for (int i = 0; i < s_ci.n_peers && i < COLLISION_MAX_PEERS; i++) {
         if (!s_ci.peers[i].gps_valid) continue;
         draw_peer(&s_ci.peers[i], peer_color(i));
-        if ((i & 3) == 3) vTaskDelay(1); /* periodic yield */
+        if ((i & 3) == 3) vTaskDelay(1);  /* yield định kỳ */
     }
 
-    /* 4. Ego vehicle */
     draw_ego(s_ci.ego.heading);
     vTaskDelay(1);
 
-    /* 5. Status bar */
     draw_statusbar(&s_ci.ego, s_ci.n_peers);
-
-    /* 6. Footer */
     draw_footer();
     vTaskDelay(1);
 }
 
-/* ── Boot splash ─────────────────────────────────────────────── */
+/* ── Màn hình boot splash ────────────────────────────────────────────── */
 static void render_boot(void)
 {
     tft_clear(TFT_BG_IDLE);
@@ -215,7 +208,7 @@ static void render_boot(void)
     vTaskDelay(pdMS_TO_TICKS(1500));
 }
 
-/* ── Task entry point ────────────────────────────────────────── */
+/* ── Task entry ──────────────────────────────────────────────────────── */
 void task_display_tft(void *arg)
 {
     TickType_t last_wake = xTaskGetTickCount();
@@ -238,7 +231,7 @@ void task_display_tft(void *arg)
         refresh_state();
         render_frame();
 #else
-        /* Stub: log to console */
+        /* Stub mode: log ra console thay vì vẽ màn hình */
         refresh_state();
         ESP_LOGD(TAG, "[TFT] ego v=%.1f hdg=%.0f | peers=%d | alert=%d",
                  s_ci.ego.velocity,

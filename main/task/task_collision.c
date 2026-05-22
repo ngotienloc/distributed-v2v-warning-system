@@ -1,3 +1,11 @@
+/* task/task_collision.c — Đánh giá nguy cơ va chạm mỗi 100 ms.
+ *
+ * Nhận collision_input_t từ q_collision_in (do task_v2v gửi ~15 Hz).
+ * Với mỗi peer có GPS hợp lệ:
+ *   1. Chuyển tọa độ GPS → ENU (m) lấy ego làm gốc.
+ *   2. Bù trễ mạng bằng dead reckoning đơn giản (dùng esp_timer).
+ *   3. Gọi ebbl_eval() → alert_result_t.
+ * Gửi cảnh báo nặng nhất → q_alert_tft. */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_queues.h"
@@ -11,6 +19,7 @@
 
 static const char *TAG = "task_collision";
 
+/* Trả về cảnh báo có mức độ nghiêm trọng hơn trong hai kết quả */
 static alert_result_t pick_worse(alert_result_t a, alert_result_t b)
 {
     return (b.level > a.level) ? b : a;
@@ -28,15 +37,12 @@ void task_collision(void *arg)
     ESP_LOGI(TAG, "started — q_collision_in -> EBBL -> q_alert_tft");
 
     while (1) {
-        /* ── 1. Block on q_collision_in ────────────────────────── *
-         * Wait up to CFG_PERIOD_COLLISION_MS (100ms).
-         * If task_v2v is operating at ~15 Hz we get a snapshot ~every 67ms. */
+        /* ── 1. Chờ dữ liệu từ task_v2v (timeout 100 ms) ────────────── */
         if (xQueueReceive(q_collision_in, &ci, pdMS_TO_TICKS(CFG_PERIOD_COLLISION_MS)) != pdTRUE) {
-            continue;  /* timeout — no data, skip cycle */
+            continue;  /* timeout, không có dữ liệu */
         }
 
-        /* ── 2. Fast path: no GPS fix or no peers ----------------- *
-         * Still report n_peers so the display can show nearby cars. */
+        /* ── 2. Fast path: không GPS hoặc không có peer ──────────────── */
         if (!ci.ego.gps_valid || ci.n_peers == 0) {
             alert_result_t none = {0};
             none.n_peers = ci.n_peers;
@@ -44,19 +50,13 @@ void task_collision(void *arg)
             continue;
         }
 
-        /* ── 3. [Fix #1] esp_timer timestamp hiện tại — ms precision
-         *     Dùng để tính age của peer packet.
-         *     Cả cur_esp_ms và peer.update_ts_ms đều là esp_timer của EGO
-         *     → không cần đồng bộ đồng hồ với xe peer.              */
         uint32_t cur_esp_ms = now_ms();
 
-        /* ── 4. Evaluate each peer ─────────────────────────────── */
+        /* ── 3. Đánh giá từng peer ───────────────────────────────────── */
         alert_result_t best = {0};
 
         vehicle_state_t self = ci.ego;
-        /* In the ENU frame used here, ego is the origin.
-         * peer.x/y are computed via geo_latlon_to_enu(self.lat, self.lon, ...)
-         * so they are already relative to (0,0). Force self.x/y = 0 to match. */
+        /* Trong hệ ENU lấy ego làm gốc: self.x = self.y = 0 */
         self.x = 0.0f;
         self.y = 0.0f;
 
@@ -64,18 +64,14 @@ void task_collision(void *arg)
             vehicle_state_t peer = ci.peers[i];
             if (!peer.gps_valid) continue;
 
-            /* 4a. Convert peer GPS → ENU relative to ego */
+            /* 3a. Chuyển GPS peer → ENU offset (m) so với ego */
             float px, py;
             geo_latlon_to_enu(self.lat, self.lon,
                                peer.lat, peer.lon,
                                &px, &py);
 
-            /* 4b. [Fix #1] Dead reckoning bù trễ mạng — esp_timer precision
-             *     peer.update_ts_ms = esp_timer của EGO lúc nhận packet
-             *                         (gán trong packet_deserialize).
-             *     age_ms = thời gian packet nằm trong queue + xử lý (~70ms).
-             *     Trước: dùng nmea_time_ms (GPS 1Hz) → sai đến ±1000ms = ±16m @60km/h
-             *     Sau:   dùng esp_timer (1ms)        → sai ~70ms        = ~1.2m @60km/h */
+            /* 3b. Bù trễ mạng: ngoại suy vị trí peer theo thời gian packet nằm trong queue.
+             *     update_ts_ms = esp_timer lúc EGO nhận packet → sai số ~70 ms (~1.2 m @60 km/h). */
             uint32_t age_ms = cur_esp_ms - peer.update_ts_ms;
             if (age_ms > 0 && age_ms <= CFG_PKT_STALE_MS) {
                 float dt_net = age_ms * 0.001f;
@@ -86,7 +82,7 @@ void task_collision(void *arg)
             peer.x = px;
             peer.y = py;
 
-            /* 4c. EBBL evaluation */
+            /* 3c. Gọi EBBL: kiểm tra phanh gấp và TTC */
             alert_result_t r_ebbl = ebbl_eval(&self, &peer);
             best = pick_worse(best, r_ebbl);
 
@@ -102,4 +98,3 @@ void task_collision(void *arg)
         xQueueSend(q_alert_tft, &best, 0);
     }
 }
-

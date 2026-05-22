@@ -1,3 +1,7 @@
+/* drivers/imu/mpu6050.c — Driver cho MPU6050 (accel ±8g, gyro ±500°/s).
+ *
+ * Dữ liệu thô 16-bit đọc burst từ REG_ACCEL_XOUT_H (14 byte: accel + temp + gyro).
+ * Đơn vị đầu ra: m/s² cho accel, rad/s cho gyro. */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mpu6050.h"
@@ -11,30 +15,34 @@
 
 static const char *TAG = "mpu6050";
 
-#define REG_PWR_MGMT_1   0x6B
-#define REG_SMPLRT_DIV   0x19
-#define REG_CONFIG       0x1A
-#define REG_GYRO_CFG     0x1B
-#define REG_ACCEL_CFG    0x1C
-#define REG_ACCEL_XOUT_H 0x3B
-#define REG_WHO_AM_I     0x75
+/* ── Địa chỉ thanh ghi MPU6050 ──────────────────────────────────────── */
+#define REG_PWR_MGMT_1   0x6B  /* Power Management: bit SLEEP */
+#define REG_SMPLRT_DIV   0x19  /* Sample Rate Divider */
+#define REG_CONFIG       0x1A  /* DLPF config */
+#define REG_GYRO_CFG     0x1B  /* Gyro Full Scale Select */
+#define REG_ACCEL_CFG    0x1C  /* Accel Full Scale Select */
+#define REG_ACCEL_XOUT_H 0x3B  /* Bắt đầu vùng dữ liệu cảm biến (14 byte) */
+#define REG_WHO_AM_I     0x75  /* ID chip */
 
+/* WHO_AM_I chấp nhận cả chip gốc và một số clone phổ biến */
 #define WHO_GENUINE     0x68
 #define WHO_CLONE_70    0x70
 #define WHO_CLONE_72    0x72
 #define WHO_VALID(x)    ((x)==WHO_GENUINE || (x)==WHO_CLONE_70 || (x)==WHO_CLONE_72)
 
-#define ACCEL_SCALE  CFG_ACCEL_SCALE   
-#define GYRO_SCALE   CFG_GYRO_SCALE   
+#define ACCEL_SCALE  CFG_ACCEL_SCALE   /* raw → m/s² */
+#define GYRO_SCALE   CFG_GYRO_SCALE    /* raw → rad/s */
 
-static void         *s_dev  = NULL; 
-static mpu_calib_t   s_cal  = {0};
+static void         *s_dev = NULL;  /* handle thiết bị I2C */
+static mpu_calib_t   s_cal = {0};   /* offset hiệu chỉnh */
 
+/* Gộp 2 byte big-endian → int16 */
 static inline int16_t to16(uint8_t hi, uint8_t lo)
 {
     return (int16_t)((hi << 8) | lo);
 }
 
+/* Kiểm tra WHO_AM_I — trả về false nếu không nhận ra chip */
 bool mpu_present(void)
 {
     uint8_t who = 0xFF;
@@ -51,6 +59,7 @@ bool mpu_present(void)
     return ok;
 }
 
+/* Khởi tạo I2C, kiểm tra chip, cấu hình range và load calibration từ NVS */
 esp_err_t mpu_init(void)
 {
     i2c_bus_handle_t bus;
@@ -65,23 +74,23 @@ esp_err_t mpu_init(void)
         return ESP_FAIL;
     }
 
-    // Wake up: clear SLEEP bit 
+    /* Thoát sleep mode */
     ESP_ERROR_CHECK(i2c_bus_write_reg(s_dev, REG_PWR_MGMT_1, 0x00));
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    //Sample rate = 100 Hz
+    /* Sample rate = 1000 / (1 + 9) = 100 Hz */
     ESP_ERROR_CHECK(i2c_bus_write_reg(s_dev, REG_SMPLRT_DIV, 9));
 
-    //DLPF bandwidth ~44 Hz
+    /* DLPF bandwidth ~44 Hz — lọc nhiễu rung động cao tần */
     ESP_ERROR_CHECK(i2c_bus_write_reg(s_dev, REG_CONFIG, 0x03));
 
-    // Gyro ±500°
+    /* Gyro range ±500°/s (FS_SEL = 1) */
     ESP_ERROR_CHECK(i2c_bus_write_reg(s_dev, REG_GYRO_CFG, 1 << 3));
 
-    // Accel ±8
+    /* Accel range ±8g (AFS_SEL = 2) */
     ESP_ERROR_CHECK(i2c_bus_write_reg(s_dev, REG_ACCEL_CFG, 2 << 3));
 
-    //Load calibration from NVS 
+    /* Nạp calibration từ NVS nếu có (từ lần chạy trước) */
     nvs_handle_t nvs;
     if (nvs_open("mpu_calib", NVS_READONLY, &nvs) == ESP_OK) {
         size_t sz = sizeof(mpu_calib_t);
@@ -96,9 +105,11 @@ esp_err_t mpu_init(void)
     return ESP_OK;
 }
 
+/* Hiệu chỉnh tĩnh: lấy trung bình n = CFG_IMU_CALIB_S*100 mẫu.
+ * Trừ ~1g khỏi az để bù trọng lực khi đặt phẳng. Lưu vào NVS. */
 esp_err_t mpu_calibrate(void)
 {
-    const int n = CFG_IMU_CALIB_S * 100;  //100hz sample 
+    const int n = CFG_IMU_CALIB_S * 100;  /* 100 Hz × giây */
     ESP_LOGI(TAG, "Calibrating %d s - keep vehicle stationary...", CFG_IMU_CALIB_S);
 
     int32_t sax = 0, say = 0, saz = 0;
@@ -118,13 +129,12 @@ esp_err_t mpu_calibrate(void)
 
     s_cal.ax = (int16_t)(sax / n);
     s_cal.ay = (int16_t)(say / n);
-    // Remove 1g from az (gravity when flat after callib) 
-    s_cal.az = (int16_t)(saz / n - (int32_t)(9.81f / ACCEL_SCALE));
+    s_cal.az = (int16_t)(saz / n - (int32_t)(9.81f / ACCEL_SCALE));  /* bù 1g trục z */
     s_cal.gx = (int16_t)(sgx / n);
     s_cal.gy = (int16_t)(sgy / n);
     s_cal.gz = (int16_t)(sgz / n);
 
-    
+    /* Lưu vào NVS để dùng cho lần khởi động tiếp theo */
     nvs_handle_t nvs;
     if (nvs_open("mpu_calib", NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_blob(nvs, "cal", &s_cal, sizeof(mpu_calib_t));
@@ -137,6 +147,7 @@ esp_err_t mpu_calibrate(void)
     return ESP_OK;
 }
 
+/* Đọc một mẫu 14 byte (accel + temp + gyro), áp offset calib, chuyển sang SI */
 esp_err_t mpu_read(imu_data_t *out)
 {
     uint8_t buf[14];

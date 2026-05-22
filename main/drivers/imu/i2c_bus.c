@@ -1,11 +1,13 @@
+/* drivers/imu/i2c_bus.c — Triển khai lớp trừu tượng I2C dùng i2c_master API. */
 #include "i2c_bus.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 
 static const char *TAG = "i2c_bus";
 
-#define I2C_TIMEOUT_MS 50
+#define I2C_TIMEOUT_MS 50  /* timeout mỗi giao dịch I2C (ms) */
 
+/* Khởi tạo I2C master bus với internal pull-up và glitch filter */
 esp_err_t i2c_bus_init(int port, int sda_pin, int scl_pin,
                         uint32_t freq_hz, i2c_bus_handle_t *out)
 {
@@ -29,6 +31,7 @@ esp_err_t i2c_bus_init(int port, int sda_pin, int scl_pin,
     return ESP_OK;
 }
 
+/* Thêm thiết bị I2C 7-bit địa chỉ vào bus đã khởi tạo */
 esp_err_t i2c_bus_add_device(i2c_bus_handle_t bus, uint8_t addr,
                               uint32_t scl_speed_hz, void **dev_out)
 {
@@ -48,6 +51,7 @@ esp_err_t i2c_bus_add_device(i2c_bus_handle_t bus, uint8_t addr,
     return ESP_OK;
 }
 
+/* Ghi một byte vào thanh ghi: [reg, val] */
 esp_err_t i2c_bus_write_reg(void *dev, uint8_t reg, uint8_t val)
 {
     uint8_t buf[2] = { reg, val };
@@ -55,11 +59,13 @@ esp_err_t i2c_bus_write_reg(void *dev, uint8_t reg, uint8_t val)
                                buf, 2, I2C_TIMEOUT_MS);
 }
 
+/* Đọc một byte từ thanh ghi (wrapper của read_burst với len=1) */
 esp_err_t i2c_bus_read_reg(void *dev, uint8_t reg, uint8_t *val)
 {
     return i2c_bus_read_burst(dev, reg, val, 1);
 }
 
+/* Đọc liên tiếp len byte: write [reg] → read [buf] */
 esp_err_t i2c_bus_read_burst(void *dev, uint8_t reg,
                               uint8_t *buf, uint8_t len)
 {

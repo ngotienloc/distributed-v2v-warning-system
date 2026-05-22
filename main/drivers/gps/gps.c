@@ -1,3 +1,13 @@
+/* drivers/gps/gps.c — GPS driver cho u-blox NEO-6M.
+ *
+ * Kiến trúc 2 task nội bộ:
+ *   uart_reader_task : đọc byte từ UART FIFO, ghép thành câu NMEA → s_sentence_q.
+ *   parse_task_fn    : parse câu NMEA từ s_sentence_q → gọi callback s_cb.
+ *
+ * Khởi tạo (gps_init):
+ *   A. UART ở 9600 baud (boot default của NEO-6M).
+ *   B. Gửi lệnh UBX cấu hình: đổi baud → 38400, tắt GGA/GLL/GSA/GSV/VTG, đặt 5 Hz.
+ *   C. Tạo hai task trên. */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
@@ -8,21 +18,21 @@
 #include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
-#include <math.h>   
+#include <math.h>
 
 static const char *TAG = "gps";
 
-static QueueHandle_t s_uart_evt_q;   // UART driver EVENT queue 
-static QueueHandle_t s_sentence_q;   // Raw NMEA SENTENCE queue 
-static TaskHandle_t  s_reader_task;  
+static QueueHandle_t s_uart_evt_q;  /* queue sự kiện UART từ driver ESP-IDF */
+static QueueHandle_t s_sentence_q;  /* queue câu NMEA đã ghép (NMEA_MAX_LEN+1 bytes) */
+static TaskHandle_t  s_reader_task;
 static TaskHandle_t  s_parse_task;
 
-static gps_fix_cb_t  s_cb     = NULL;
+static gps_fix_cb_t  s_cb     = NULL;  /* callback do người dùng đăng ký */
 static void         *s_cb_ctx = NULL;
 
-static gps_fix_t         s_last_fix  = {0};
-static volatile bool     s_has_fix   = false;
-static volatile uint32_t s_fix_ms    = 0;
+static gps_fix_t         s_last_fix = {0};
+static volatile bool     s_has_fix  = false;
+static volatile uint32_t s_fix_ms   = 0;  /* esp_timer lúc nhận fix cuối */
 
 static uint32_t now_ms(void)
 {
@@ -30,10 +40,9 @@ static uint32_t now_ms(void)
 }
 
 /* ── UBX protocol helpers ─────────────────────────────────────────────
- * NEO-6M uses u-blox Binary Protocol (UBX) for configuration.
+ * NEO-6M dùng u-blox Binary Protocol (UBX) để cấu hình.
  * Frame: 0xB5 0x62 | class | id | len_lo len_hi | payload | CK_A CK_B
- * Checksum = Fletcher-8 over (class, id, len_lo, len_hi, payload[]).
- * ──────────────────────────────────────────────────────────────────── */
+ * Checksum = Fletcher-8 tính trên (class, id, len_lo, len_hi, payload[]). */
 static void ubx_send(uint8_t cls, uint8_t id,
                      const uint8_t *payload, uint16_t pay_len)
 {
@@ -41,7 +50,7 @@ static void ubx_send(uint8_t cls, uint8_t id,
     uint8_t len_lo = (uint8_t)(pay_len & 0xFF);
     uint8_t len_hi = (uint8_t)(pay_len >> 8);
 
-    /* Compute Fletcher-8 checksum */
+    /* Tính Fletcher-8 checksum */
 #define CK(b) do { ck_a += (b); ck_b += ck_a; } while(0)
     CK(cls); CK(id); CK(len_lo); CK(len_hi);
     for (uint16_t i = 0; i < pay_len; i++) CK(payload[i]);
@@ -54,69 +63,61 @@ static void ubx_send(uint8_t cls, uint8_t id,
     uart_write_bytes(CFG_GPS_UART_PORT, (const char *)tail,    sizeof(tail));
 }
 
-/* Disable one NMEA sentence on UART1 output (rate = 0)
- * cls/id: e.g. 0xF0/0x00 = GGA, 0xF0/0x01 = GLL, etc. */
+/* Tắt một loại câu NMEA trên cổng UART1 (rate = 0) */
 static void ubx_disable_nmea(uint8_t nmea_cls, uint8_t nmea_id)
 {
-    /* CFG-MSG (8-byte form): msgClass, msgID, rate[6] (I2C,UART1,UART2,USB,SPI,res) */
+    /* CFG-MSG (8 byte): msgClass, msgID, rate[6] cho I2C/UART1/UART2/USB/SPI/reserved */
     const uint8_t payload[8] = { nmea_cls, nmea_id, 0, 0, 0, 0, 0, 0 };
     ubx_send(0x06, 0x01, payload, sizeof(payload));
     vTaskDelay(pdMS_TO_TICKS(30));
 }
 
-/* Configure NEO-6M for 5 Hz operation:
- *  1. Switch module baud to CFG_GPS_UART_BAUD (38400) via UBX-CFG-PRT
- *  2. Disable unused NMEA sentences (GGA, GLL, GSA, GSV, VTG)
- *  3. Set 5 Hz nav rate via UBX-CFG-RATE
- * NOTE: Called while ESP32 UART is still at CFG_GPS_UART_BAUD_BOOT (9600). */
+/* Cấu hình NEO-6M cho chế độ 5 Hz, chỉ xuất RMC:
+ *   1. Đổi baud module → 38400 (UBX-CFG-PRT)
+ *   2. Tắt GGA, GLL, GSA, GSV, VTG
+ *   3. Đặt chu kỳ đo 200 ms = 5 Hz (UBX-CFG-RATE)
+ * Gọi khi ESP32 UART vẫn ở 9600 baud. */
 static void gps_neo6m_configure(void)
 {
-    /* ── Step 1: Tell NEO-6M to switch to 38400 baud ────────────────
-     * UBX-CFG-PRT (portID=1 = UART1), 20-byte payload.
-     * mode=0x000008C0 = 8N1, inProto=7 (UBX+NMEA), outProto=3 (UBX+NMEA) */
+    /* ── Bước 1: Đổi baud NEO-6M → 38400 (UBX-CFG-PRT, UART1, 20 byte) ── */
     const uint8_t cfg_prt[20] = {
         0x01,                          /* portID = UART1              */
         0x00,                          /* reserved1                   */
         0x00, 0x00,                    /* txReady = disabled          */
         0xC0, 0x08, 0x00, 0x00,       /* mode = 8N1                  */
-        /* baudRate = 38400 = 0x9600 in little-endian */
-        0x00, 0x96, 0x00, 0x00,
+        0x00, 0x96, 0x00, 0x00,       /* baudRate = 38400 (little-endian) */
         0x07, 0x00,                    /* inProtoMask = UBX+NMEA+RTCM */
         0x03, 0x00,                    /* outProtoMask = UBX+NMEA     */
         0x00, 0x00,                    /* flags                       */
         0x00, 0x00,                    /* reserved2                   */
     };
     ubx_send(0x06, 0x00, cfg_prt, sizeof(cfg_prt));
-    /* Wait for NEO-6M to apply baud change, then switch ESP32 UART */
     vTaskDelay(pdMS_TO_TICKS(100));
     uart_set_baudrate(CFG_GPS_UART_PORT, CFG_GPS_UART_BAUD);
     uart_flush_input(CFG_GPS_UART_PORT);
     ESP_LOGI(TAG, "NEO-6M baud -> %d", CFG_GPS_UART_BAUD);
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    /* ── Step 2: Disable unused NMEA output sentences ────────────────
-     * Keep only RMC (class F0 ID 04) which carries lat/lon/speed/hdg.
-     * This reduces UART load from ~8 sentences/s to 5 RMC/s. */
-    ubx_disable_nmea(0xF0, 0x00);   /* GGA  */
-    ubx_disable_nmea(0xF0, 0x01);   /* GLL  */
-    ubx_disable_nmea(0xF0, 0x02);   /* GSA  */
-    ubx_disable_nmea(0xF0, 0x03);   /* GSV  */
-    ubx_disable_nmea(0xF0, 0x05);   /* VTG  */
+    /* ── Bước 2: Tắt các câu không dùng, giữ lại RMC (F0/04) ─────────── */
+    ubx_disable_nmea(0xF0, 0x00);   /* GGA */
+    ubx_disable_nmea(0xF0, 0x01);   /* GLL */
+    ubx_disable_nmea(0xF0, 0x02);   /* GSA */
+    ubx_disable_nmea(0xF0, 0x03);   /* GSV */
+    ubx_disable_nmea(0xF0, 0x05);   /* VTG */
     ESP_LOGI(TAG, "NEO-6M: GGA/GLL/GSA/GSV/VTG disabled, RMC only");
 
-    /* ── Step 3: Set 5 Hz navigation rate ────────────────────────────
-     * UBX-CFG-RATE: measRate=200ms, navRate=1, timeRef=1 (GPS) */
+    /* ── Bước 3: Đặt tốc độ đo 5 Hz (measRate = 200 ms) ──────────────── */
     const uint8_t cfg_rate[6] = {
-        0xC8, 0x00,   /* measRate = 200 ms (5 Hz) */
-        0x01, 0x00,   /* navRate  = 1             */
-        0x01, 0x00,   /* timeRef  = GPS time      */
+        0xC8, 0x00,   /* measRate = 200 ms */
+        0x01, 0x00,   /* navRate  = 1      */
+        0x01, 0x00,   /* timeRef  = GPS    */
     };
     ubx_send(0x06, 0x08, cfg_rate, sizeof(cfg_rate));
     vTaskDelay(pdMS_TO_TICKS(50));
     ESP_LOGI(TAG, "NEO-6M: rate set to %d Hz (measRate=200ms)", CFG_GPS_RATE_HZ);
 }
 
-
+/* Chuyển chuỗi NMEA dạng DDDMM.MMMM + chỉ hướng → decimal degrees */
 static float parse_coord(const char *field, char dir)
 {
     if (!field || field[0] == '\0') return 0.0f;
@@ -128,15 +129,17 @@ static float parse_coord(const char *field, char dir)
     return result;
 }
 
+/* Parse trường thời gian UTC HHMMSS → ms (chỉ nội bộ, không dùng làm timestamp hệ thống) */
 static uint32_t parse_utc_ms(const char *s)
 {
     if (!s || strlen(s) < 6) return 0;
-    int h = (s[0]-'0')*10 + (s[1]-'0');
-    int m = (s[2]-'0')*10 + (s[3]-'0');
+    int h   = (s[0]-'0')*10 + (s[1]-'0');
+    int m   = (s[2]-'0')*10 + (s[3]-'0');
     int sec = (s[4]-'0')*10 + (s[5]-'0');
     return (uint32_t)((h * 3600 + m * 60 + sec) * 1000);
 }
 
+/* Kiểm tra checksum XOR của câu NMEA (byte giữa '$' và '*') */
 static bool checksum_ok(const char *sent)
 {
     if (!sent || sent[0] != '$') return false;
@@ -148,7 +151,7 @@ static bool checksum_ok(const char *sent)
     return calc == got;
 }
 
-//Split
+/* Tách câu NMEA bằng dấu phẩy → mảng con trỏ fields[] */
 static int tokenize(char *buf, char *fields[], int max)
 {
     int n = 0;
@@ -157,12 +160,16 @@ static int tokenize(char *buf, char *fields[], int max)
     return n;
 }
 
-static void process_sentence(const char *sentence){
-    if(!checksum_ok(sentence))  return; 
+/* Parse và xử lý một câu NMEA hoàn chỉnh:
+ *   RMC → cập nhật đầy đủ lat/lon/speed/heading → gọi callback.
+ *   GGA → chỉ cập nhật lat/lon nội bộ (không gọi callback vì thiếu speed/heading). */
+static void process_sentence(const char *sentence)
+{
+    if (!checksum_ok(sentence)) return;
     char buf[NMEA_MAX_LEN + 1];
     strlcpy(buf, sentence, sizeof(buf));
 
-     char *f[20] = {0};
+    char *f[20] = {0};
     int   nf    = tokenize(buf, f, 20);
     if (nf < 6) return;
 
@@ -172,15 +179,13 @@ static void process_sentence(const char *sentence){
                    strncmp(f[0], "$GNGGA", 6) == 0);
 
     if (is_rmc && nf >= 9) {
-        // Field[2] = 'A' (active) required 
-        if (f[2][0] != 'A') return;
-        s_last_fix.lat          = parse_coord(f[3], f[4][0]);
-        s_last_fix.lon          = parse_coord(f[5], f[6][0]);
-        s_last_fix.speed_ms     = strtof(f[7], NULL) * 0.51444f; /* knots->m/s */
-        s_last_fix.heading_rad  = strtof(f[8], NULL) * (float)M_PI / 180.0f;
+        if (f[2][0] != 'A') return;  /* chỉ xử lý khi status = 'A' (Active/Fix) */
+        s_last_fix.lat         = parse_coord(f[3], f[4][0]);
+        s_last_fix.lon         = parse_coord(f[5], f[6][0]);
+        s_last_fix.speed_ms    = strtof(f[7], NULL) * 0.51444f;  /* knots → m/s */
+        s_last_fix.heading_rad = strtof(f[8], NULL) * (float)M_PI / 180.0f;
 
-        /* RMC mang đủ thông tin (lat/lon/speed/heading) — trigger callback */
-        uint32_t t          = now_ms();
+        uint32_t t              = now_ms();
         s_last_fix.valid        = true;
         s_last_fix.timestamp_ms = t;
         s_has_fix               = true;
@@ -194,18 +199,17 @@ static void process_sentence(const char *sentence){
                  s_last_fix.heading_rad * 180.0f / (float)M_PI);
 
     } else if (is_gga && nf >= 7) {
-        /* GGA không mang speed/heading — chỉ cập nhật lat/lon nội bộ,
-         * KHÔNG gọi callback (tránh gửi speed/heading cũ bị trễ 1 giây). */
-        if (atoi(f[6]) == 0) return;
-        s_last_fix.lat          = parse_coord(f[2], f[3][0]);
-        s_last_fix.lon          = parse_coord(f[4], f[5][0]);
+        /* GGA không có speed/heading → chỉ lưu nội bộ, KHÔNG gọi callback
+         * để tránh gửi speed/heading cũ (bị trễ 1 giây) xuống pipeline. */
+        if (atoi(f[6]) == 0) return;  /* fix quality = 0 = invalid */
+        s_last_fix.lat = parse_coord(f[2], f[3][0]);
+        s_last_fix.lon = parse_coord(f[4], f[5][0]);
         ESP_LOGV(TAG, "GGA lat=%.6f lon=%.6f (no callback)",
                  s_last_fix.lat, s_last_fix.lon);
-    } else {
-        return;
     }
 }
 
+/* Task đọc byte từ UART FIFO và ghép thành câu NMEA hoàn chỉnh */
 static void uart_reader_task(void *arg)
 {
     uart_event_t event;
@@ -221,24 +225,25 @@ static void uart_reader_task(void *arg)
                                     event.size, pdMS_TO_TICKS(20));
             for (int i = 0; i < n; i++) {
                 char c = (char)rx[i];
-                if (c == '$') slen = 0;         
+                if (c == '$') slen = 0;         /* bắt đầu câu mới */
                 if (slen < NMEA_MAX_LEN) sentence[slen++] = c;
                 if (c == '\n' && slen > 6) {
                     sentence[slen] = '\0';
-                    /* Only forward sentences we care about */
+                    /* Chỉ forward RMC và GGA */
                     if (strncmp(sentence, "$GPRMC", 6) == 0 ||
                         strncmp(sentence, "$GNRMC", 6) == 0 ||
                         strncmp(sentence, "$GPGGA", 6) == 0 ||
                         strncmp(sentence, "$GNGGA", 6) == 0) {
                         char copy[NMEA_MAX_LEN + 1];
                         memcpy(copy, sentence, (size_t)slen + 1);
-                        xQueueSend(s_sentence_q, copy, 0); /* drop if full */
+                        xQueueSend(s_sentence_q, copy, 0);  /* drop nếu queue đầy */
                     }
                     slen = 0;
                 }
             }
         } else if (event.type == UART_FIFO_OVF ||
                    event.type == UART_BUFFER_FULL) {
+            /* Tràn buffer: xả sạch để tránh dữ liệu rác */
             ESP_LOGW(TAG, "UART overflow - flush");
             uart_flush_input(CFG_GPS_UART_PORT);
             xQueueReset(s_uart_evt_q);
@@ -247,6 +252,7 @@ static void uart_reader_task(void *arg)
     }
 }
 
+/* Task parse: nhận câu NMEA từ queue → gọi process_sentence() */
 static void parse_task_fn(void *arg)
 {
     char sentence[NMEA_MAX_LEN + 1];
@@ -265,6 +271,7 @@ void gps_register_cb(gps_fix_cb_t cb, void *ctx)
 
 bool gps_has_fix(void)    { return s_has_fix; }
 
+/* Trả về số ms từ lần fix cuối; UINT32_MAX nếu chưa có fix */
 uint32_t gps_fix_age_ms(void)
 {
     if (!s_has_fix || s_fix_ms == 0) return UINT32_MAX;
@@ -276,9 +283,9 @@ esp_err_t gps_init(void)
     s_sentence_q = xQueueCreate(CFG_GPS_SENTENCE_QLEN, NMEA_MAX_LEN + 1);
     if (!s_sentence_q) return ESP_ERR_NO_MEM;
 
-    /* ── Step A: Init UART at boot baud (9600) to send UBX config ── */
+    /* ── Bước A: Khởi tạo UART ở 9600 baud (default NEO-6M) ─────────── */
     uart_config_t ucfg = {
-        .baud_rate  = CFG_GPS_UART_BAUD_BOOT,   /* 9600 — NEO-6M default */
+        .baud_rate  = CFG_GPS_UART_BAUD_BOOT,
         .data_bits  = UART_DATA_8_BITS,
         .parity     = UART_PARITY_DISABLE,
         .stop_bits  = UART_STOP_BITS_1,
@@ -294,11 +301,11 @@ esp_err_t gps_init(void)
                                          0, 16,
                                          &s_uart_evt_q, 0));
 
-    /* ── Step B: Send UBX commands to configure NEO-6M ── */
-    vTaskDelay(pdMS_TO_TICKS(200));   /* Wait for module to be ready */
-    gps_neo6m_configure();            /* baud->38400, RMC-only, 5Hz  */
+    /* ── Bước B: Gửi lệnh UBX cấu hình NEO-6M ──────────────────────── */
+    vTaskDelay(pdMS_TO_TICKS(200));   /* chờ module sẵn sàng */
+    gps_neo6m_configure();            /* baud→38400, RMC only, 5Hz */
 
-    /* ── Step C: Start reader and parse tasks ── */
+    /* ── Bước C: Tạo task đọc và parse ─────────────────────────────── */
     xTaskCreatePinnedToCore(uart_reader_task, "gps_rd",
                             3072, NULL, CFG_PRIO_GPS + 1,
                             &s_reader_task, CFG_CORE_GPS);
