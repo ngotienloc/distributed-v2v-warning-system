@@ -10,15 +10,36 @@
 /* In dữ liệu ra UART để vẽ đồ thị (Serial Plotter) */
 #define ENABLE_UART_PLOT        1
 
-/* ── GPS (NEO-6M, UART) ──────────────────────────────────────────────── */
+/* ── GPS Model Selection ─────────────────────────────────────────────────
+ * Chỉ cần thay đổi GPS_MODEL để chuyển giữa NEO-6M và NEO-8M.
+ * Driver sẽ tự động dùng đúng lệnh UBX và tham số tương ứng. */
+#define GPS_MODEL_NEO6M  1   /* u-blox NEO-6M: tối đa 5 Hz, UART 38400 */
+#define GPS_MODEL_NEO8M  2   /* u-blox NEO-8M: tối đa 10 Hz, UART 115200 */
+
+#define GPS_MODEL        GPS_MODEL_NEO6M   /* ← ĐỔI Ở ĐÂY để chuyển module */
+
+/* ── GPS UART pins (dùng chung cho cả NEO-6M và NEO-8M) ─────────────── */
 #define CFG_GPS_UART_PORT       UART_NUM_1
 #define CFG_GPS_UART_TX_PIN     17
 #define CFG_GPS_UART_RX_PIN     18
-#define CFG_GPS_UART_BAUD       38400   /* baud sau khi cấu hình UBX (5Hz RMC ~350B/s) */
-#define CFG_GPS_UART_BAUD_BOOT  9600    /* baud mặc định khi NEO-6M khởi động */
 #define CFG_GPS_UART_BUF        512
 #define CFG_GPS_SENTENCE_QLEN   8       /* độ sâu queue NMEA sentence */
-#define CFG_GPS_RATE_HZ         5       /* tốc độ cập nhật GPS (Hz) */
+#define CFG_GPS_UART_BAUD_BOOT  9600    /* baud mặc định khi module khởi động */
+
+/* ── Config riêng theo model ─────────────────────────────────────────── */
+#if GPS_MODEL == GPS_MODEL_NEO6M
+  #define CFG_GPS_UART_BAUD   38400   /* baud hoạt động (5Hz RMC ~350 B/s) */
+  #define CFG_GPS_RATE_HZ     5       /* tốc độ cập nhật (Hz) */
+  #define CFG_GPS_STALE_MS    800     /* 5Hz → 200ms/fix; 4 fix missed = stale */
+
+#elif GPS_MODEL == GPS_MODEL_NEO8M
+  #define CFG_GPS_UART_BAUD   115200  /* baud hoạt động (10Hz RMC ~700 B/s) */
+  #define CFG_GPS_RATE_HZ     10      /* tốc độ cập nhật (Hz) */
+  #define CFG_GPS_STALE_MS    500     /* 10Hz → 100ms/fix; 5 fix missed = stale */
+
+#else
+  #error "GPS_MODEL không hợp lệ. Chọn GPS_MODEL_NEO6M hoặc GPS_MODEL_NEO8M."
+#endif
 
 /* ── IMU (MPU6050, I2C) ──────────────────────────────────────────────── */
 #define CFG_IMU_I2C_PORT        I2C_NUM_0
@@ -89,8 +110,7 @@
 #define CFG_PKT_STALE_MS        1000  /* thời gian tối đa packet được coi là hợp lệ (ms) */
 #define CFG_PKT_MAGIC           0xB6  /* byte nhận dạng gói tin V2V */
 
-/* ── Ngưỡng mất tín hiệu GPS ─────────────────────────────────────────── */
-#define CFG_GPS_STALE_MS        800   /* 5Hz → 200ms/fix; mất 4 fix liên tiếp = stale */
+
 
 /* ── Hệ số chuyển đổi cảm biến ──────────────────────────────────────── */
 #define CFG_ACCEL_SCALE         (1.0f / 4096.0f * 9.81f)   /* ±8g → m/s² */

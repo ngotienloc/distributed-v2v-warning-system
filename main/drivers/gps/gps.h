@@ -22,7 +22,9 @@ typedef void (*gps_fix_cb_t)(const gps_fix_t *fix, void *ctx);
 /* Đăng ký callback — phải gọi trước gps_init() hoặc ngay sau */
 void gps_register_cb(gps_fix_cb_t cb, void *ctx);
 
-/* Khởi tạo UART, cấu hình NEO-6M (5 Hz, RMC only), tạo task đọc/parse */
+/* Khởi tạo UART, cấu hình module theo GPS_MODEL trong config.h, tạo task đọc/parse.
+ *   GPS_MODEL_NEO6M → 5 Hz, 38400 baud
+ *   GPS_MODEL_NEO8M → 10 Hz, 115200 baud */
 esp_err_t gps_init(void);
 
 /* Trả về true nếu đã nhận được ít nhất một fix hợp lệ */

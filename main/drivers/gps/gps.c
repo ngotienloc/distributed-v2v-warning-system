@@ -1,12 +1,16 @@
-/* drivers/gps/gps.c — GPS driver cho u-blox NEO-6M.
+/* drivers/gps/gps.c — GPS driver cho u-blox NEO-6M và NEO-8M.
+ *
+ * Model được chọn qua macro GPS_MODEL trong config.h:
+ *   GPS_MODEL_NEO6M → gps_neo6m_configure(): 5 Hz, 38400 baud
+ *   GPS_MODEL_NEO8M → gps_neo8m_configure(): 10 Hz, 115200 baud
  *
  * Kiến trúc 2 task nội bộ:
  *   uart_reader_task : đọc byte từ UART FIFO, ghép thành câu NMEA → s_sentence_q.
  *   parse_task_fn    : parse câu NMEA từ s_sentence_q → gọi callback s_cb.
  *
  * Khởi tạo (gps_init):
- *   A. UART ở 9600 baud (boot default của NEO-6M).
- *   B. Gửi lệnh UBX cấu hình: đổi baud → 38400, tắt GGA/GLL/GSA/GSV/VTG, đặt 5 Hz.
+ *   A. UART ở 9600 baud (boot default của cả hai module).
+ *   B. Gửi lệnh UBX cấu hình phù hợp với GPS_MODEL.
  *   C. Tạo hai task trên. */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -76,7 +80,7 @@ static void ubx_disable_nmea(uint8_t nmea_cls, uint8_t nmea_id)
  *   1. Đổi baud module → 38400 (UBX-CFG-PRT)
  *   2. Tắt GGA, GLL, GSA, GSV, VTG
  *   3. Đặt chu kỳ đo 200 ms = 5 Hz (UBX-CFG-RATE)
- * Gọi khi ESP32 UART vẫn ở 9600 baud. */
+ * Gọi khi ESP32 UART vẫn ở 9600 baud (CFG_GPS_UART_BAUD_BOOT). */
 static void gps_neo6m_configure(void)
 {
     /* ── Bước 1: Đổi baud NEO-6M → 38400 (UBX-CFG-PRT, UART1, 20 byte) ── */
@@ -85,7 +89,7 @@ static void gps_neo6m_configure(void)
         0x00,                          /* reserved1                   */
         0x00, 0x00,                    /* txReady = disabled          */
         0xC0, 0x08, 0x00, 0x00,       /* mode = 8N1                  */
-        0x00, 0x96, 0x00, 0x00,       /* baudRate = 38400 (little-endian) */
+        0x00, 0x96, 0x00, 0x00,       /* baudRate = 38400 (0x9600, little-endian) */
         0x07, 0x00,                    /* inProtoMask = UBX+NMEA+RTCM */
         0x03, 0x00,                    /* outProtoMask = UBX+NMEA     */
         0x00, 0x00,                    /* flags                       */
@@ -108,13 +112,61 @@ static void gps_neo6m_configure(void)
 
     /* ── Bước 3: Đặt tốc độ đo 5 Hz (measRate = 200 ms) ──────────────── */
     const uint8_t cfg_rate[6] = {
-        0xC8, 0x00,   /* measRate = 200 ms */
-        0x01, 0x00,   /* navRate  = 1      */
-        0x01, 0x00,   /* timeRef  = GPS    */
+        0xC8, 0x00,   /* measRate = 200 ms (5 Hz) */
+        0x01, 0x00,   /* navRate  = 1             */
+        0x01, 0x00,   /* timeRef  = GPS           */
     };
     ubx_send(0x06, 0x08, cfg_rate, sizeof(cfg_rate));
     vTaskDelay(pdMS_TO_TICKS(50));
     ESP_LOGI(TAG, "NEO-6M: rate set to %d Hz (measRate=200ms)", CFG_GPS_RATE_HZ);
+}
+
+/* Cấu hình NEO-8M cho chế độ 10 Hz, chỉ xuất RMC:
+ *   1. Đổi baud module → 115200 (UBX-CFG-PRT)
+ *   2. Tắt GGA, GLL, GSA, GSV, VTG, GNS
+ *   3. Đặt chu kỳ đo 100 ms = 10 Hz (UBX-CFG-RATE)
+ * NEO-8M hỗ trợ đa chòm sao (GPS+GLONASS+Galileo) → $GNRMC.
+ * Gọi khi ESP32 UART vẫn ở 9600 baud (CFG_GPS_UART_BAUD_BOOT). */
+static void gps_neo8m_configure(void)
+{
+    /* ── Bước 1: Đổi baud NEO-8M → 115200 (UBX-CFG-PRT, UART1, 20 byte) ─
+     * baudRate = 115200 = 0x0001C200 → little-endian: 0x00, 0xC2, 0x01, 0x00 */
+    const uint8_t cfg_prt[20] = {
+        0x01,                          /* portID = UART1              */
+        0x00,                          /* reserved1                   */
+        0x00, 0x00,                    /* txReady = disabled          */
+        0xC0, 0x08, 0x00, 0x00,       /* mode = 8N1                  */
+        0x00, 0xC2, 0x01, 0x00,       /* baudRate = 115200 (little-endian) */
+        0x07, 0x00,                    /* inProtoMask = UBX+NMEA+RTCM */
+        0x03, 0x00,                    /* outProtoMask = UBX+NMEA     */
+        0x00, 0x00,                    /* flags                       */
+        0x00, 0x00,                    /* reserved2                   */
+    };
+    ubx_send(0x06, 0x00, cfg_prt, sizeof(cfg_prt));
+    vTaskDelay(pdMS_TO_TICKS(100));
+    uart_set_baudrate(CFG_GPS_UART_PORT, CFG_GPS_UART_BAUD);
+    uart_flush_input(CFG_GPS_UART_PORT);
+    ESP_LOGI(TAG, "NEO-8M baud -> %d", CFG_GPS_UART_BAUD);
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    /* ── Bước 2: Tắt các câu không dùng, giữ lại RMC ─────────────────── */
+    ubx_disable_nmea(0xF0, 0x00);   /* GGA */
+    ubx_disable_nmea(0xF0, 0x01);   /* GLL */
+    ubx_disable_nmea(0xF0, 0x02);   /* GSA */
+    ubx_disable_nmea(0xF0, 0x03);   /* GSV */
+    ubx_disable_nmea(0xF0, 0x05);   /* VTG */
+    ubx_disable_nmea(0xF0, 0x0D);   /* GNS — câu thêm của NEO-8M multi-GNSS */
+    ESP_LOGI(TAG, "NEO-8M: GGA/GLL/GSA/GSV/VTG/GNS disabled, RMC only");
+
+    /* ── Bước 3: Đặt tốc độ đo 10 Hz (measRate = 100 ms) ─────────────── */
+    const uint8_t cfg_rate[6] = {
+        0x64, 0x00,   /* measRate = 100 ms (10 Hz) */
+        0x01, 0x00,   /* navRate  = 1              */
+        0x01, 0x00,   /* timeRef  = GPS            */
+    };
+    ubx_send(0x06, 0x08, cfg_rate, sizeof(cfg_rate));
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ESP_LOGI(TAG, "NEO-8M: rate set to %d Hz (measRate=100ms)", CFG_GPS_RATE_HZ);
 }
 
 /* Chuyển chuỗi NMEA dạng DDDMM.MMMM + chỉ hướng → decimal degrees */
@@ -129,15 +181,6 @@ static float parse_coord(const char *field, char dir)
     return result;
 }
 
-/* Parse trường thời gian UTC HHMMSS → ms (chỉ nội bộ, không dùng làm timestamp hệ thống) */
-static uint32_t parse_utc_ms(const char *s)
-{
-    if (!s || strlen(s) < 6) return 0;
-    int h   = (s[0]-'0')*10 + (s[1]-'0');
-    int m   = (s[2]-'0')*10 + (s[3]-'0');
-    int sec = (s[4]-'0')*10 + (s[5]-'0');
-    return (uint32_t)((h * 3600 + m * 60 + sec) * 1000);
-}
 
 /* Kiểm tra checksum XOR của câu NMEA (byte giữa '$' và '*') */
 static bool checksum_ok(const char *sent)
@@ -301,9 +344,13 @@ esp_err_t gps_init(void)
                                          0, 16,
                                          &s_uart_evt_q, 0));
 
-    /* ── Bước B: Gửi lệnh UBX cấu hình NEO-6M ──────────────────────── */
+    /* ── Bước B: Gửi lệnh UBX cấu hình theo model đã chọn ─────────────── */
     vTaskDelay(pdMS_TO_TICKS(200));   /* chờ module sẵn sàng */
-    gps_neo6m_configure();            /* baud→38400, RMC only, 5Hz */
+#if GPS_MODEL == GPS_MODEL_NEO6M
+    gps_neo6m_configure();            /* baud→38400, RMC only, 5Hz  */
+#elif GPS_MODEL == GPS_MODEL_NEO8M
+    gps_neo8m_configure();            /* baud→115200, RMC only, 10Hz */
+#endif
 
     /* ── Bước C: Tạo task đọc và parse ─────────────────────────────── */
     xTaskCreatePinnedToCore(uart_reader_task, "gps_rd",
@@ -313,7 +360,12 @@ esp_err_t gps_init(void)
                             3072, NULL, CFG_PRIO_GPS,
                             &s_parse_task, CFG_CORE_GPS);
 
-    ESP_LOGI(TAG, "GPS init OK (UART%d baud=%d RX=%d rate=%dHz)",
+    ESP_LOGI(TAG, "GPS init OK (model=%s UART%d baud=%d RX=%d rate=%dHz)",
+#if GPS_MODEL == GPS_MODEL_NEO6M
+             "NEO-6M",
+#else
+             "NEO-8M",
+#endif
              CFG_GPS_UART_PORT, CFG_GPS_UART_BAUD,
              CFG_GPS_UART_RX_PIN, CFG_GPS_RATE_HZ);
     return ESP_OK;
