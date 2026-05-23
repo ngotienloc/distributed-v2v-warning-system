@@ -14,11 +14,13 @@
 #include "app_queues.h"
 #include "drivers/tft/tft_driver.h"
 #include "../config.h"
+#include "fusion/geo_utils/geo_utils.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+
 
 static const char *TAG = "task_tft";
 
@@ -48,13 +50,25 @@ static uint32_t now_ms(void)
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
-/* ── Drain queue, cập nhật state nội bộ ─────────────────────────────── */
+/* ── Drain queue, cập nhật state nội bộ ─────────────────────── */
 static void refresh_state(void)
 {
     /* Drain q_tft_collision — bản sao riêng cho TFT, tránh race với collision task */
     collision_input_t tmp_ci;
     while (xQueueReceive(q_tft_collision, &tmp_ci, 0) == pdTRUE)
         s_ci = tmp_ci;
+
+    /* Chuyển đổi lat/lon của từng peer sang ENU (m) lấy ego làm gốc.
+     * ego.lat/lon có thể = 0 khi GPS chưa có fix — các peer sẽ nằm ở tâm
+     * nhưng được render_frame() bỏ qua nếu !gps_valid. */
+    if (s_ci.ego.gps_valid) {
+        for (int i = 0; i < s_ci.n_peers && i < COLLISION_MAX_PEERS; i++) {
+            if (!s_ci.peers[i].gps_valid) continue;
+            geo_latlon_to_enu(s_ci.ego.lat,       s_ci.ego.lon,
+                              s_ci.peers[i].lat,  s_ci.peers[i].lon,
+                              &s_ci.peers[i].x,   &s_ci.peers[i].y);
+        }
+    }
 
     /* Drain alerts — giữ cảnh báo hiển thị tối thiểu 2 giây */
     alert_result_t tmp_al;
@@ -69,6 +83,7 @@ static void refresh_state(void)
     if (s_alert_active && now_ms() > s_alert_until)
         s_alert_active = false;
 }
+
 
 /* ── Màu chấm peer dựa theo mức cảnh báo ────────────────────────────── */
 static uint16_t peer_color(int peer_idx)
