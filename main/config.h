@@ -20,8 +20,8 @@
 
 /* ── GPS UART pins (dùng chung cho cả NEO-6M và NEO-8M) ─────────────── */
 #define CFG_GPS_UART_PORT       UART_NUM_1
-#define CFG_GPS_UART_TX_PIN     17
-#define CFG_GPS_UART_RX_PIN     18
+#define CFG_GPS_UART_TX_PIN     39
+#define CFG_GPS_UART_RX_PIN     38
 #define CFG_GPS_UART_BUF        512
 #define CFG_GPS_SENTENCE_QLEN   8       /* độ sâu queue NMEA sentence */
 #define CFG_GPS_UART_BAUD_BOOT  9600    /* baud mặc định khi module khởi động */
@@ -43,20 +43,20 @@
 
 /* ── IMU (MPU6050, I2C) ──────────────────────────────────────────────── */
 #define CFG_IMU_I2C_PORT        I2C_NUM_0
-#define CFG_IMU_I2C_SDA         38
-#define CFG_IMU_I2C_SCL         39
+#define CFG_IMU_I2C_SDA         42
+#define CFG_IMU_I2C_SCL         41
 #define CFG_IMU_I2C_FREQ_HZ     400000
 #define CFG_IMU_I2C_ADDR        0x68    /* địa chỉ I2C mặc định MPU6050 */
 #define CFG_IMU_CALIB_S         3       /* thời gian hiệu chỉnh (giây), xe phải đứng yên */
 
 /* ── TFT ST7735 (SPI) ────────────────────────────────────────────────── */
 #define CFG_TFT_SPI_HOST        SPI2_HOST
-#define CFG_TFT_MOSI_PIN        16
-#define CFG_TFT_SCLK_PIN        15
-#define CFG_TFT_CS_PIN          5
+#define CFG_TFT_MOSI_PIN        35
+#define CFG_TFT_SCLK_PIN        36
+#define CFG_TFT_CS_PIN          20
 #define CFG_TFT_DC_PIN          2
-#define CFG_TFT_RST_PIN         4
-#define CFG_TFT_BL_PIN          6
+#define CFG_TFT_RST_PIN         21
+#define CFG_TFT_BL_PIN          37
 #define CFG_TFT_SPI_SPEED_HZ    27000000
 #define CFG_TFT_WIDTH           128     /* pixel */
 #define CFG_TFT_HEIGHT          160
