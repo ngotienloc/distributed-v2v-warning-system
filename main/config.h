@@ -137,7 +137,7 @@
 /* ── EBBL — Emergency Brake / Collision Warning ──────────────────────── */
 #define CFG_EBBL_BRAKE_MS2      (-2.5f)  /* ngưỡng gia tốc phanh gấp (m/s²) */
 #define CFG_EBBL_BRAKE_COUNT    3        /* số mẫu liên tiếp cần vượt ngưỡng để kích hoạt */
-#define CFG_EBBL_CONE_DEG       30.0f    /* góc nửa cone phía trước (°) */
+#define CFG_EBBL_CONE_DEG       30.0f    /* góc nửa cone mặc định phía trước (°) */
 #define CFG_EBBL_MAX_DIST_M     150.0f   /* khoảng cách tối đa cảnh báo (m) */
 #define CFG_EBBL_TTC_CRIT_S     2.0f     /* TTC < 2s → CRITICAL */
 #define CFG_EBBL_TTC_WARN_S     4.0f     /* TTC < 4s → WARNING */
@@ -145,3 +145,8 @@
 #define CFG_EBBL_BURST_COUNT    3        /* số lần phát burst khi phanh gấp */
 #define CFG_EBBL_BURST_MS       20       /* khoảng cách giữa các gói burst (ms) */
 #define CFG_EBBL_COOLDOWN_MS    500      /* thời gian chờ giữa hai lần kích hoạt EBBL (ms) */
+
+/* ── EBBL — Bộ lọc Cone Động & Heading Match (chống sai số GPS nhảy làn) */
+#define CFG_EBBL_CONE_NEAR_DEG  60.0f    /* góc nửa cone quét rộng ở cự ly gần (°) */
+#define CFG_EBBL_CONE_NEAR_M    15.0f    /* ngưỡng khoảng cách để kích hoạt cone rộng (m) */
+#define CFG_EBBL_HEADING_LIMIT  30.0f    /* độ lệch heading tối đa (°) để coi là cùng chiều */

@@ -6,7 +6,11 @@
 #include <string.h>
 
 /* Tính tốc độ tiếp cận (approach) và khoảng cách (dist) giữa self và peer.
- * Chỉ xét peer nằm trong cone phía trước self (±CFG_EBBL_CONE_DEG).
+ * Áp dụng Dynamic Cone Filter:
+ *   - Cự ly gần (< CFG_EBBL_CONE_NEAR_M): mở rộng cone lên CFG_EBBL_CONE_NEAR_DEG
+ *     để không bỏ sót cảnh báo khi GPS bị lệch làn.
+ *   - Cự ly xa (>= CFG_EBBL_CONE_NEAR_M): giữ chặt cone ở CFG_EBBL_CONE_DEG
+ *     để lọc xe ở làn khác.
  * Trả về false nếu peer không trong cone hoặc ngoài tầm. */
 static bool compute_approach(const vehicle_state_t *self,
                               const vehicle_state_t *peer,
@@ -24,7 +28,12 @@ static bool compute_approach(const vehicle_state_t *self,
     float bearing_abs = atan2f(dx, dy);          /* atan2(East, North) */
     float bearing_rel = angle_diff(bearing_abs, self->heading);
 
-    if (fabsf(bearing_rel) > DEG2RAD(CFG_EBBL_CONE_DEG)) return false;
+    /* Áp dụng góc cone động: cự ly gần thì mở rộng cone */
+    float cone_limit = (d < CFG_EBBL_CONE_NEAR_M)
+                       ? CFG_EBBL_CONE_NEAR_DEG
+                       : CFG_EBBL_CONE_DEG;
+
+    if (fabsf(bearing_rel) > DEG2RAD(cone_limit)) return false;
 
     /* Chiếu vận tốc tương đối lên trục self→peer */
     float ux = dx / d;
@@ -43,6 +52,7 @@ static bool compute_approach(const vehicle_state_t *self,
     return true;
 }
 
+
 /* Ánh xạ TTC (giây) → mức cảnh báo */
 static alert_level_t ttc_to_level(float ttc)
 {
@@ -56,6 +66,12 @@ alert_result_t ebbl_eval(const vehicle_state_t *self,
                           const vehicle_state_t *peer)
 {
     alert_result_t res = {0};
+
+    /* ── Bộ lọc Heading Match ─────────────────────────────────────────────────────
+     * Chỉ cảnh báo nếu 2 xe di chuyển cùng chiều (lệch heading < CFG_EBBL_HEADING_LIMIT).
+     * Loại bỏ xe ngược chiều và xe đi cắt ngang ngã tư dù góc cone quét trúng. */
+    float hdg_diff = fabsf(angle_diff(self->heading, peer->heading));
+    if (hdg_diff > DEG2RAD(CFG_EBBL_HEADING_LIMIT)) return res;
 
     float d, approach;
     if (!compute_approach(self, peer, &d, &approach)) return res;
