@@ -50,7 +50,9 @@ static void do_broadcast(alert_type_t type, alert_level_t level)
     espnow_broadcast(&pkt);
 }
 
-/* Drain q_v2v_rx → deserialize → upsert vào bảng neighbor */
+/* Drain q_v2v_rx → deserialize → upsert vào bảng neighbor.
+ * Lọc gói loopback: bỏ qua nếu ID trùng với ego (self-packet filtering).
+ * Ngăn xe tự thêm mình vào ntable gây cảnh báo TTC Critical giả (dist=0). */
 static void process_rx(void)
 {
     v2v_packet_t    pkt;
@@ -58,6 +60,13 @@ static void process_rx(void)
 
     while (xQueueReceive(q_v2v_rx, &pkt, 0) == pdTRUE) {
         if (!packet_is_valid(&pkt)) continue;
+
+        /* Lọc gói tự phát bị loopback về — so sánh 4-byte ID */
+        if (s_ego_valid && memcmp(pkt.id, s_ego.id, 4) == 0) {
+            ESP_LOGD(TAG, "Self-packet dropped (loopback)");
+            continue;
+        }
+
         if (packet_deserialize(&pkt, &peer)) {
             ntable_upsert(&peer);
             ESP_LOGD(TAG, "RX from [%02X%02X%02X%02X] spd=%.1fkm/h",

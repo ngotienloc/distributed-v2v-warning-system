@@ -1,6 +1,8 @@
 /* v2v/espnow_comm.c — Triển khai ESP-NOW cho V2V broadcast.
  *
- * on_recv() được gọi từ WiFi task (ISR-safe) → dùng xQueueSendFromISR.
+ * on_recv() được gọi từ WiFi task (FreeRTOS task context, KHÔNG phải ISR)
+ *   → dùng xQueueSend() thay vì xQueueSendFromISR() để tránh corrupt queue
+ *     và crash hệ thống trên kiến trúc đa nhân ESP32.
  * on_send() chỉ log lỗi TX nếu DEBUG level.
  * Peer broadcast được đăng ký sẵn với địa chỉ FF:FF:FF:FF:FF:FF. */
 #include "freertos/FreeRTOS.h"
@@ -17,7 +19,8 @@ static const char   *TAG    = "espnow";
 static QueueHandle_t s_rx_q;                           /* queue nhận gói tin V2V */
 static const uint8_t s_bcast[6] = CFG_ESPNOW_BCAST;   /* FF:FF:FF:FF:FF:FF */
 
-/* Callback nhận ESP-NOW (chạy trong WiFi task — ISR-safe) */
+/* Callback nhận ESP-NOW — chạy trong WiFi task (FreeRTOS task context).
+ * KHÔNG dùng FromISR API vì đây không phải hardware ISR. */
 static void on_recv(const esp_now_recv_info_t *info,
                     const uint8_t             *data,
                     int                        len)
@@ -35,8 +38,9 @@ static void on_recv(const esp_now_recv_info_t *info,
     v2v_packet_t pkt;
     memcpy(&pkt, data, sizeof(v2v_packet_t));
 
-    BaseType_t woken = pdFALSE;
-    if (xQueueSendFromISR(s_rx_q, &pkt, &woken) != pdTRUE) {
+    /* Dùng xQueueSend (non-blocking, timeout=0) thay vì xQueueSendFromISR.
+     * on_recv chạy trong WiFi task context → dùng task API là đúng. */
+    if (xQueueSend(s_rx_q, &pkt, 0) != pdTRUE) {
         ESP_LOGD(TAG, "RX queue full - packet dropped");
     }
 
@@ -48,8 +52,6 @@ static void on_recv(const esp_now_recv_info_t *info,
                  len);
     }
     #endif
-
-    if (woken) portYIELD_FROM_ISR();
 }
 
 /* Callback gửi ESP-NOW — chỉ log khi TX thất bại */

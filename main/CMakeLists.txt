@@ -1,7 +1,37 @@
-file(GLOB_RECURSE MAIN_SRCS "main.c" "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
 idf_component_register(
     SRCS
-        ${MAIN_SRCS}
+        # Root
+        "main.c"
+
+        # Collision
+        "collision/ebbl/ebbl.c"
+
+        # Drivers
+        "drivers/gps/gps.c"
+        "drivers/imu/i2c_bus.c"
+        "drivers/imu/mpu6050.c"
+        "drivers/tft/tft_driver.c"
+
+        # Fusion
+        "fusion/complementary_filter/com_fil.c"
+        "fusion/dead_reckoning/dead_reckoning.c"
+        "fusion/geo_utils/geo_utils.c"
+        "fusion/math_utils.c"
+
+        # Tasks
+        "task/app_queues.c"
+        "task/task_collision.c"
+        "task/task_display_tft.c"
+        "task/task_fusion.c"
+        "task/task_gps.c"
+        "task/task_imu.c"
+        "task/task_localization.c"
+        "task/task_v2v.c"
+
+        # V2V layer
+        "v2v/espnow_comm.c"
+        "v2v/neighbor_table.c"
+        "v2v/packet.c"
 
     INCLUDE_DIRS
         "."
