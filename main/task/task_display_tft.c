@@ -45,6 +45,13 @@ static alert_result_t    s_alert       = {0};
 static bool              s_alert_active = false;
 static uint32_t          s_alert_until  = 0;  /* hiển thị cảnh báo tối thiểu 2 giây */
 
+extern volatile uint32_t g_gps_rx_count;
+extern volatile uint32_t g_gps_raw_bytes;
+
+/* [TEST 2.4] Lưu lịch sử 5 lần DR test gần nhất */
+#define MAX_DR_HISTORY 5
+static dr_test_result_t  s_dr_history[MAX_DR_HISTORY] = {0};
+
 static uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -79,9 +86,19 @@ static void refresh_state(void)
             s_alert_until  = now_ms() + 2000;
         }
     }
-
     if (s_alert_active && now_ms() > s_alert_until)
         s_alert_active = false;
+
+    /* [TEST 2.4] Drain kết quả DR — lưu vào lịch sử */
+    dr_test_result_t tmp_dr;
+    while (xQueueReceive(q_dr_result, &tmp_dr, 0) == pdTRUE) {
+        /* Dịch các kết quả cũ xuống dưới */
+        for (int i = MAX_DR_HISTORY - 1; i > 0; i--) {
+            s_dr_history[i] = s_dr_history[i - 1];
+        }
+        /* Lưu kết quả mới lên đầu */
+        s_dr_history[0] = tmp_dr;
+    }
 }
 
 
@@ -151,12 +168,18 @@ static void draw_statusbar(const vehicle_state_t *ego, int n_peers)
     snprintf(buf, sizeof(buf), "%3dkm/h", (int)(ego->velocity * 3.6f));
     tft_draw_str(8, 1, buf, TFT_CYAN, TFT_RGB(15, 25, 45), 1);
 
+    /* Hiển thị số byte thô (B) và số NMEA hợp lệ (Rx) */
+    snprintf(buf, sizeof(buf), "B:%lu R:%lu", 
+             (unsigned long)(g_gps_raw_bytes % 10000), 
+             (unsigned long)(g_gps_rx_count % 1000));
+    tft_draw_str(55, 1, buf, TFT_WHITE, TFT_RGB(15, 25, 45), 1);
+
     snprintf(buf, sizeof(buf), "N:%d", n_peers);
     tft_draw_str(CFG_TFT_WIDTH - 24, 1, buf,
                  TFT_DOT_SAFE, TFT_RGB(15, 25, 45), 1);
 }
 
-/* Vẽ footer (40px dưới cùng): cảnh báo hoặc heading + trạng thái */
+/* Vẽ footer (40px dưới cùng): cảnh báo, kết quả DR test, hoặc heading + trạng thái */
 static void draw_footer(void)
 {
     if (s_alert_active) {
@@ -188,24 +211,43 @@ static void draw_footer(void)
     }
 }
 
+/* ── Vẽ bảng kết quả DR ─────────────────────────────────────────────── */
+static void draw_dr_table(void)
+{
+    int y = STATUSBAR_H + 4;
+    tft_draw_str(4, y, "DR TEST CASES", TFT_CYAN, TFT_BG_IDLE, 1);
+    y += 12;
+    tft_draw_str(4, y, "L |T(s)|DR(m)|kmh", TFT_ACCENT, TFT_BG_IDLE, 1);
+    tft_draw_line(0, y + 10, CFG_TFT_WIDTH, y + 10, TFT_RGB(25, 40, 55));
+    y += 14;
+
+    for (int i = 0; i < MAX_DR_HISTORY; i++) {
+        if (s_dr_history[i].run_num > 0) {
+            char buf[32];
+            /* Hiển thị: Lần | Thời gian | Quãng đường | Vận tốc */
+            snprintf(buf, sizeof(buf), "%-2d|%-4.1f|%-5.1f|%3.0f", 
+                     s_dr_history[i].run_num, 
+                     s_dr_history[i].blackout_s, 
+                     s_dr_history[i].dr_dist_m,
+                     s_dr_history[i].avg_vel_kmh);
+            tft_draw_str(4, y, buf, TFT_WHITE, TFT_BG_IDLE, 1);
+        } else {
+            tft_draw_str(4, y, "- | -  |  -  | - ", TFT_GRAY, TFT_BG_IDLE, 1);
+        }
+        y += 16;
+    }
+}
+
 /* ── Vẽ một frame hoàn chỉnh ────────────────────────────────────────── */
 static void render_frame(void)
 {
-    /* Chỉ xóa vùng radar (tránh full-clear → nhanh hơn) */
+    /* Xóa vùng radar (tránh full-clear → nhanh hơn) */
     tft_fill_rect(0, STATUSBAR_H,
                   CFG_TFT_WIDTH, FOOTER_Y - STATUSBAR_H,
                   TFT_BG_IDLE);
 
-    draw_radar_grid();
-    vTaskDelay(1);  /* yield để tránh WDT */
-
-    for (int i = 0; i < s_ci.n_peers && i < COLLISION_MAX_PEERS; i++) {
-        if (!s_ci.peers[i].gps_valid) continue;
-        draw_peer(&s_ci.peers[i], peer_color(i));
-        if ((i & 3) == 3) vTaskDelay(1);  /* yield định kỳ */
-    }
-
-    draw_ego(s_ci.ego.heading);
+    /* Vẽ bảng lịch sử DR thay cho radar */
+    draw_dr_table();
     vTaskDelay(1);
 
     draw_statusbar(&s_ci.ego, s_ci.n_peers);

@@ -38,6 +38,9 @@ static gps_fix_t         s_last_fix = {0};
 static volatile bool     s_has_fix  = false;
 static volatile uint32_t s_fix_ms   = 0;  /* esp_timer lúc nhận fix cuối */
 
+volatile uint32_t g_gps_rx_count = 0;
+volatile uint32_t g_gps_raw_bytes = 0;
+
 static uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -266,6 +269,7 @@ static void uart_reader_task(void *arg)
         if (event.type == UART_DATA) {
             int n = uart_read_bytes(CFG_GPS_UART_PORT, rx,
                                     event.size, pdMS_TO_TICKS(20));
+            g_gps_raw_bytes += n;
             for (int i = 0; i < n; i++) {
                 char c = (char)rx[i];
                 if (c == '$') slen = 0;         /* bắt đầu câu mới */
@@ -277,6 +281,7 @@ static void uart_reader_task(void *arg)
                         strncmp(sentence, "$GNRMC", 6) == 0 ||
                         strncmp(sentence, "$GPGGA", 6) == 0 ||
                         strncmp(sentence, "$GNGGA", 6) == 0) {
+                        g_gps_rx_count++;
                         char copy[NMEA_MAX_LEN + 1];
                         memcpy(copy, sentence, (size_t)slen + 1);
                         xQueueSend(s_sentence_q, copy, 0);  /* drop nếu queue đầy */

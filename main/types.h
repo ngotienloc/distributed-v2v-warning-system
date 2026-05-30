@@ -112,3 +112,16 @@ typedef struct {
     vehicle_state_t peers[COLLISION_MAX_PEERS];
     int             n_peers;
 } collision_input_t;
+
+/* ── Kết quả một lần chạy Dead Reckoning test (2.4) ─────────────────────
+ * Được tạo trong task_localization khi GPS phục hồi sau khi bị che.
+ * Gửi qua q_dr_result → task_display_tft hiển thị lên màn hình TFT. */
+typedef struct {
+    int   run_num;       /* số thứ tự lần chạy (1, 2, 3...) */
+    float dr_dist_m;     /* quãng đường tính từ DR tích phân IMU (m) */
+    float gps_dist_m;    /* quãng đường thực tế từ GPS trước/sau che (m) */
+    float drift_m;       /* |dr_dist - gps_dist| (m) */
+    float drift_pct;     /* drift_m / gps_dist_m * 100 (%) */
+    float blackout_s;    /* thời gian mất GPS thực tế (giây) */
+    float avg_vel_kmh;   /* vận tốc trung bình lúc mất sóng (km/h) */
+} dr_test_result_t;
