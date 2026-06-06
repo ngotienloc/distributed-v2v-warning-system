@@ -22,6 +22,23 @@ static const char *TAG = "task_localization";
  * 0.3 = giảm 30%/s — đủ nhẹ để không báo động trong đường hầm ngắn. */
 #define DR_DECAY_PER_S  0.3f
 
+/* ── IMU snapshot ring buffer ────────────────────────────────────────────
+ * Lưu tối đa IMU_BUF_SIZE mẫu fusion gần nhất để tái tích phân khi GPS fix.
+ * 16 × 10ms = 160ms — đủ bù pipeline latency thực tế (thường < 100ms).    */
+#define IMU_BUF_SIZE  16
+
+typedef struct {
+    float    ax_lin;
+    float    ay_lin;
+    float    heading;
+    float    dt;
+    uint32_t ts_ms;
+} imu_snap_t;
+
+static imu_snap_t s_imu_buf[IMU_BUF_SIZE];
+static int        s_imu_head  = 0;   /* index ghi tiếp theo (vòng tròn) */
+static int        s_imu_count = 0;   /* số phần tử hợp lệ hiện có (0..IMU_BUF_SIZE) */
+
 static uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -56,24 +73,42 @@ void task_localization(void *arg)
         float dt = fused.dt;
         if (dt <= 0.001f || dt > 0.05f) dt = 0.01f;
 
-        /* ── 1. GPS hợp lệ: reset DR về vị trí GPS ──────────────────── */
+        /* ── 1. GPS hợp lệ: reset DR + tái tích phân IMU buffer ──────── */
+        bool gps_reset_this_tick = false;
         if (fused.gps_updated && fused.gps.valid) {
-            float fix_age_s = (float)(now_ms() - fused.gps.timestamp_ms) * 0.001f;
+            uint32_t gps_ts = fused.gps.timestamp_ms;
 
-            /* Bù trễ pipeline: ngoại suy vị trí GPS theo fix_age */
+            /* Reset DR về (0,0) tại đúng thời điểm GPS fix — không ngoại suy.
+             * fix_age = 0.0f vì ta sẽ bù bằng re-integration thực tế bên dưới. */
             dr_reset_from_gps(&dr,
                                0.0f, 0.0f,
                                fused.gps.speed,
                                fused.gps.course,
-                               fix_age_s);
+                               0.0f);
+
+            /* Tái tích phân các mẫu IMU xảy ra SAU thời điểm GPS fix.
+             * Duyệt buffer từ cũ → mới; bỏ qua sample hiện tại (ts_ms == now_ms)
+             * vì nó sẽ được xử lý ở bước dr_update bên dưới — nhưng ta skip
+             * bước đó bằng cờ gps_reset_this_tick để tránh double-integrate. */
+            for (int i = 0; i < s_imu_count; i++) {
+                int idx = (s_imu_head - s_imu_count + i + IMU_BUF_SIZE) % IMU_BUF_SIZE;
+                if (s_imu_buf[idx].ts_ms > gps_ts) {
+                    dr_update(&dr,
+                              s_imu_buf[idx].ax_lin,
+                              s_imu_buf[idx].ay_lin,
+                              s_imu_buf[idx].heading,
+                              s_imu_buf[idx].dt);
+                }
+            }
 
             ego.lat         = fused.gps.latitude;
             ego.lon         = fused.gps.longitude;
             ego.gps_valid   = true;
-            ego.local_ts_ms = fused.gps.timestamp_ms;
+            ego.local_ts_ms = gps_ts;
+            gps_reset_this_tick = true;
 
-            ESP_LOGD(TAG, "GPS reset: lat=%.6f lon=%.6f spd=%.1fkm/h age=%.0fms",
-                     ego.lat, ego.lon, fused.gps.speed * 3.6f, fix_age_s * 1000.0f);
+            ESP_LOGD(TAG, "GPS reset+reint: lat=%.6f lon=%.6f spd=%.1fkm/h ts=%lums",
+                     ego.lat, ego.lon, fused.gps.speed * 3.6f, (unsigned long)gps_ts);
         }
 
         /* ── 2. Kiểm tra GPS stale: đánh dấu mất GPS sau CFG_GPS_STALE_MS ── */
@@ -87,11 +122,26 @@ void task_localization(void *arg)
         }
 
         /* ── 3. Dead Reckoning chạy mỗi chu kỳ (bất kể GPS) ────────── */
-        dr_update(&dr,
-                  fused.accel_x_lin,
-                  fused.accel_y_lin,
-                  fused.orient.heading,
-                  dt);
+        /* Bỏ qua nếu vừa re-integrate từ GPS fix để tránh double-integrate
+         * sample hiện tại (sample này đã được tái tích phân trong bước 1). */
+        if (!gps_reset_this_tick) {
+            dr_update(&dr,
+                      fused.accel_x_lin,
+                      fused.accel_y_lin,
+                      fused.orient.heading,
+                      dt);
+        }
+
+        /* Push snapshot vào ring buffer (sau dr_update để ts khớp với trạng thái DR) */
+        s_imu_buf[s_imu_head] = (imu_snap_t){
+            .ax_lin  = fused.accel_x_lin,
+            .ay_lin  = fused.accel_y_lin,
+            .heading = fused.orient.heading,
+            .dt      = dt,
+            .ts_ms   = now_ms(),
+        };
+        s_imu_head = (s_imu_head + 1) % IMU_BUF_SIZE;
+        if (s_imu_count < IMU_BUF_SIZE) s_imu_count++;
 
         /* ── 4. Chọn nguồn tốc độ ────────────────────────────────────
          * GPS hợp lệ  → tốc độ GPS (chính xác).
