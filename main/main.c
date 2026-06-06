@@ -72,36 +72,42 @@ void app_main(void)
                              CFG_STACK_IMU,
                              NULL, CFG_PRIO_IMU, NULL,
                              CFG_CORE_IMU);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     xTaskCreatePinnedToCore(task_gps,
                              "gps",
                              CFG_STACK_GPS,
                              NULL, CFG_PRIO_GPS, NULL,
                              CFG_CORE_GPS);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     xTaskCreatePinnedToCore(task_fusion,
                              "fusion",
                              CFG_STACK_FUSION,
                              NULL, CFG_PRIO_FUSION, NULL,
                              CFG_CORE_FUSION);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     xTaskCreatePinnedToCore(task_localization,
                              "localize",
                              CFG_STACK_LOCALIZATION,
                              NULL, CFG_PRIO_LOCALIZATION, NULL,
                              CFG_CORE_LOCALIZATION);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     xTaskCreatePinnedToCore(task_v2v,
                              "v2v",
                              CFG_STACK_V2V,
                              NULL, CFG_PRIO_V2V, NULL,
                              CFG_CORE_V2V);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     xTaskCreatePinnedToCore(task_collision,
                              "collision",
                              CFG_STACK_COLLISION,
                              NULL, CFG_PRIO_COLLISION, NULL,
                              CFG_CORE_COLLISION);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     xTaskCreatePinnedToCore(task_display_tft,
                              "display_tft",
