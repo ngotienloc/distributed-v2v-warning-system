@@ -1,10 +1,8 @@
-/* v2v/espnow_comm.c — Triển khai ESP-NOW cho V2V broadcast.
+/* v2v/espnow_comm.c — ESP-NOW transport cho test range ESP-NOW.
  *
- * on_recv() được gọi từ WiFi task (FreeRTOS task context, KHÔNG phải ISR)
- *   → dùng xQueueSend() thay vì xQueueSendFromISR() để tránh corrupt queue
- *     và crash hệ thống trên kiến trúc đa nhân ESP32.
- * on_send() chỉ log lỗi TX nếu DEBUG level.
- * Peer broadcast được đăng ký sẵn với địa chỉ FF:FF:FF:FF:FF:FF. */
+ * on_recv() chạy trong WiFi task context (không phải ISR).
+ * on_send() đếm số lần TX thành công → dùng để tính delivery rate TX-side.
+ */
 #include "freertos/FreeRTOS.h"
 #include "espnow_comm.h"
 #include "config.h"
@@ -14,56 +12,49 @@
 #include "esp_mac.h"
 #include "esp_log.h"
 #include <string.h>
+#include <stdatomic.h>
 
 static const char   *TAG    = "espnow";
-static QueueHandle_t s_rx_q;                           /* queue nhận gói tin V2V */
-static const uint8_t s_bcast[6] = CFG_ESPNOW_BCAST;   /* FF:FF:FF:FF:FF:FF */
+static QueueHandle_t s_rx_q;
+static const uint8_t s_bcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
-/* Callback nhận ESP-NOW — chạy trong WiFi task (FreeRTOS task context).
- * KHÔNG dùng FromISR API vì đây không phải hardware ISR. */
+/* Bộ đếm TX OK — atomic để an toàn với callback từ WiFi task */
+static atomic_uint s_tx_ok = 0;
+
+/* ── Callback nhận ─────────────────────────────────────────────────────── */
 static void on_recv(const esp_now_recv_info_t *info,
                     const uint8_t             *data,
                     int                        len)
 {
-    /* Lọc gói quá ngắn hoặc sai magic byte */
     if (len < (int)sizeof(v2v_packet_t)) {
-        ESP_LOGD(TAG, "Short packet (%d bytes), dropped", len);
+        ESP_LOGD(TAG, "Short pkt (%d B) dropped", len);
         return;
     }
     if (data[0] != CFG_PKT_MAGIC) {
-        ESP_LOGD(TAG, "Bad magic 0x%02X, dropped", data[0]);
+        ESP_LOGD(TAG, "Bad magic 0x%02X dropped", data[0]);
         return;
     }
 
     v2v_packet_t pkt;
     memcpy(&pkt, data, sizeof(v2v_packet_t));
 
-    /* Dùng xQueueSend (non-blocking, timeout=0) thay vì xQueueSendFromISR.
-     * on_recv chạy trong WiFi task context → dùng task API là đúng. */
     if (xQueueSend(s_rx_q, &pkt, 0) != pdTRUE) {
-        ESP_LOGD(TAG, "RX queue full - packet dropped");
+        ESP_LOGD(TAG, "RX queue full — pkt dropped");
     }
-
-    #if CONFIG_LOG_DEFAULT_LEVEL >= 4   /* chỉ log RSSI khi DEBUG */
-    if (info) {
-        ESP_LOGD(TAG, "RX from " MACSTR " RSSI=%d len=%d",
-                 MAC2STR(info->src_addr),
-                 info->rx_ctrl ? info->rx_ctrl->rssi : 0,
-                 len);
-    }
-    #endif
 }
 
-/* Callback gửi ESP-NOW — chỉ log khi TX thất bại */
+/* ── Callback gửi — đếm TX success ──────────────────────────────────────── */
 static void on_send(const wifi_tx_info_t *info, esp_now_send_status_t status)
 {
     (void)info;
-    if (status != ESP_NOW_SEND_SUCCESS) {
+    if (status == ESP_NOW_SEND_SUCCESS) {
+        atomic_fetch_add(&s_tx_ok, 1);
+    } else {
         ESP_LOGD(TAG, "TX failed (status=%d)", (int)status);
     }
 }
 
-/* Khởi tạo WiFi STA + ESP-NOW + đăng ký peer broadcast */
+/* ── Khởi tạo ────────────────────────────────────────────────────────────── */
 esp_err_t espnow_init(QueueHandle_t rx_queue)
 {
     s_rx_q = rx_queue;
@@ -82,7 +73,7 @@ esp_err_t espnow_init(QueueHandle_t rx_queue)
     ESP_ERROR_CHECK(esp_now_register_recv_cb(on_recv));
     ESP_ERROR_CHECK(esp_now_register_send_cb(on_send));
 
-    /* Đăng ký peer broadcast (FF:FF:FF:FF:FF:FF) */
+    /* Đăng ký peer broadcast */
     esp_now_peer_info_t peer = {0};
     memcpy(peer.peer_addr, s_bcast, 6);
     peer.channel = CFG_ESPNOW_CHANNEL;
@@ -90,14 +81,25 @@ esp_err_t espnow_init(QueueHandle_t rx_queue)
     peer.encrypt = false;
     ESP_ERROR_CHECK(esp_now_add_peer(&peer));
 
-    ESP_LOGI(TAG, "ESP-NOW init OK (ch=%d)", CFG_ESPNOW_CHANNEL);
+    ESP_LOGI(TAG, "ESP-NOW init OK (ch=%d, pkt_size=%u B)",
+             CFG_ESPNOW_CHANNEL, (unsigned)sizeof(v2v_packet_t));
     return ESP_OK;
 }
 
-/* Gửi broadcast gói tin V2V đến tất cả thiết bị trong vùng phủ */
+/* ── Broadcast ────────────────────────────────────────────────────────────── */
 esp_err_t espnow_broadcast(const v2v_packet_t *pkt)
 {
     return esp_now_send(s_bcast,
                         (const uint8_t *)pkt,
                         sizeof(v2v_packet_t));
+}
+
+uint32_t espnow_get_tx_ok(void)
+{
+    return (uint32_t)atomic_load(&s_tx_ok);
+}
+
+void espnow_reset_tx_ok(void)
+{
+    atomic_store(&s_tx_ok, 0);
 }
