@@ -411,7 +411,7 @@ void app_main(void)
     xTaskCreatePinnedToCore(task_rx,  "rx",  CFG_STACK_RX,  NULL, CFG_PRIO_RX,  NULL, 0);
 #ifdef V2V_NO_TFT
     /* Không có TFT — task_tft in ra UART, ít stack hơn */
-    xTaskCreatePinnedToCore(task_tft, "uart_disp", 2048, NULL, CFG_PRIO_TFT, NULL, 1);
+    xTaskCreatePinnedToCore(task_tft, "uart_disp", 3584, NULL, CFG_PRIO_TFT, NULL, 1);
     ESP_LOGI(TAG, "Mode: NO-TFT — results via UART log");
 #else
     xTaskCreatePinnedToCore(task_tft, "tft",  CFG_STACK_TFT, NULL, CFG_PRIO_TFT, NULL, 1);

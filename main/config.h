@@ -5,7 +5,7 @@
  *   - Comment dòng dưới  → dùng TFT ST7735 (board có màn hình)
  *   - Uncomment dòng dưới → dùng UART log  (board không có TFT)
  * ════════════════════════════════════════════════════════════════ */
-// #define V2V_NO_TFT   /* ← Bỏ dấu // nếu board không có TFT */
+ #define V2V_NO_TFT   /* ← Bỏ dấu // nếu board không có TFT */
 
 /* ═══════════════════════════════════════════════════════════════
  * config.h — Test 2.3: ESP-NOW Range Test
