@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "driver/gpio.h"
 #include <string.h>
 #include <math.h>
 
@@ -143,6 +144,13 @@ void task_localization(void *arg)
     memset(&ego, 0, sizeof(ego));
     get_self_id(ego.id);
 
+    gpio_reset_pin(GPIO_NUM_0);
+    gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
+
+    uint32_t force_gps_loss_end_ms = 0;
+    bool btn_prev = true;
+
     while (1) {
         /* Chờ fusion output tối đa 25 ms; nếu timeout → dùng dt mặc định */
         if (xQueueReceive(q_fusion_out, &fused, pdMS_TO_TICKS(25)) != pdTRUE) {
@@ -153,8 +161,17 @@ void task_localization(void *arg)
         float dt = fused.dt;
         if (dt <= 0.001f || dt > 0.05f) dt = 0.01f;
 
+        bool btn_now = (gpio_get_level(GPIO_NUM_0) == 0);
+        if (btn_now && !btn_prev) {
+            force_gps_loss_end_ms = now_ms() + DR_TEST_DURATION_MS + 500;
+            ESP_LOGW(TAG, "BOOT button pressed! Gia lap mat GPS trong 5.5s de test DR.");
+        }
+        btn_prev = btn_now;
+
+        bool force_gps_loss = (now_ms() < force_gps_loss_end_ms);
+
         /* ── 1. GPS hợp lệ: reset DR về vị trí GPS ──────────────────── */
-        if (fused.gps_updated && fused.gps.valid) {
+        if (fused.gps_updated && fused.gps.valid && !force_gps_loss) {
             float fix_age_s = (float)(now_ms() - fused.gps.timestamp_ms) * 0.001f;
 
             /* Bù trễ pipeline: ngoại suy vị trí GPS theo fix_age */
@@ -176,10 +193,14 @@ void task_localization(void *arg)
         /* ── 2. Kiểm tra GPS stale: đánh dấu mất GPS sau CFG_GPS_STALE_MS ── */
         if (ego.gps_valid) {
             uint32_t gps_age_ms = now_ms() - ego.local_ts_ms;
-            if (gps_age_ms > CFG_GPS_STALE_MS) {
+            if (gps_age_ms > CFG_GPS_STALE_MS || force_gps_loss) {
                 ego.gps_valid = false;
-                ESP_LOGW(TAG, "GPS stale (%lums) — switching to DR velocity",
-                         (unsigned long)gps_age_ms);
+                if (force_gps_loss) {
+                    ESP_LOGW(TAG, "GPS force lost via BOOT button — switching to DR velocity");
+                } else {
+                    ESP_LOGW(TAG, "GPS stale (%lums) — switching to DR velocity",
+                             (unsigned long)gps_age_ms);
+                }
             }
         }
 
