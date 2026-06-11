@@ -69,15 +69,18 @@ static void refresh_state(void)
     /* Drain alerts — giữ cảnh báo hiển thị tối thiểu 2 giây */
     alert_result_t tmp_al;
     while (xQueueReceive(q_alert_tft, &tmp_al, 0) == pdTRUE) {
-        s_alert = tmp_al;
         if (tmp_al.level > ALERT_LEVEL_NONE) {
+            s_alert = tmp_al;
             s_alert_active = true;
             s_alert_until  = now_ms() + 2000;
         }
     }
 
-    if (s_alert_active && now_ms() > s_alert_until)
+    if (s_alert_active && now_ms() > s_alert_until) {
         s_alert_active = false;
+        s_alert.level = ALERT_LEVEL_NONE;
+        s_alert.type = ALERT_TYPE_NONE;
+    }
 }
 
 /* ── Tìm kiếm xe trước gần nhất ──────────────────────────────────────── */
@@ -106,7 +109,7 @@ static int get_closest_front_peer(float *out_dist)
 static void draw_sky_scenery(void)
 {
     // Đường chân trời mờ màu xanh xám ngăn cách bầu trời
-    tft_draw_line(0, ADAS_HY - 1, CFG_TFT_WIDTH - 1, ADAS_HY - 1, TFT_RGB(35, 45, 60));
+    tft_fill_rect(0, ADAS_HY - 1, CFG_TFT_WIDTH, 1, TFT_RGB(35, 45, 60));
 
     // Vẽ 4 ngôi sao nhỏ cố định trên trời đêm
     uint16_t star_color = TFT_RGB(150, 170, 200);
@@ -122,7 +125,7 @@ static void draw_road_surface(void)
     for (int y = ADAS_HY; y <= ADAS_BY; y++) {
         float t = (float)(y - ADAS_HY) / (float)ADAS_H_SPAN;
         int half_w = (int)(t * (float)ADAS_MAX_W);
-        tft_draw_line(64 - half_w, y, 64 + half_w, y, TFT_RGB(25, 28, 32));
+        tft_fill_rect(64 - half_w, y, 2 * half_w + 1, 1, TFT_RGB(25, 28, 32));
     }
 }
 
@@ -142,7 +145,7 @@ static void draw_road_corridor(int ty)
         for (int y = y_start; y <= y_end; y++) {
             float t = (float)(y - ADAS_HY) / (float)ADAS_H_SPAN;
             int half_w = (int)(t * (float)ADAS_MAX_W);
-            tft_draw_line(64 - half_w, y, 64 + half_w, y, color);
+            tft_fill_rect(64 - half_w, y, 2 * half_w + 1, 1, color);
         }
     }
 }
@@ -220,18 +223,18 @@ static void erase_and_redraw_center_lanes(int ty, bool has_target)
     if (y_warn_start < ADAS_HY) y_warn_start = ADAS_HY;
 
     // Phân đoạn trên: xóa bằng màu đường xám
-    tft_draw_line(64, ADAS_HY, 64, y_warn_start - 1, TFT_RGB(25, 28, 32));
+    tft_fill_rect(64, ADAS_HY, 1, y_warn_start - ADAS_HY, TFT_RGB(25, 28, 32));
 
     // Phân đoạn cảnh báo: xóa bằng màu cảnh báo hiện tại
     if (s_alert_active && has_target && y_warn_start < 95) {
         uint16_t warn_color = (s_alert.level == ALERT_LEVEL_CRITICAL) ? TFT_RGB(255, 30, 30) :
                               (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_RGB(255, 140, 0) :
                                                                         TFT_RGB(255, 230, 0);
-        tft_draw_line(64, y_warn_start, 64, 95, warn_color);
+        tft_fill_rect(64, y_warn_start, 1, 95 - y_warn_start + 1, warn_color);
     }
 
     // Phân đoạn dưới: xóa bằng màu đường xám
-    tft_draw_line(64, 96, 64, ADAS_BY, TFT_RGB(25, 28, 32));
+    tft_fill_rect(64, 96, 1, ADAS_BY - 96 + 1, TFT_RGB(25, 28, 32));
 
     // 2. Vẽ các vạch đứt tâm mới di chuyển (Road motion)
     for (int i = 0; i < 3; i++) {
@@ -242,7 +245,8 @@ static void erase_and_redraw_center_lanes(int ty, bool has_target)
         int dy2 = ADAS_HY + (int)(u_next * u_next * (float)ADAS_H_SPAN);
 
         if (dy1 < ADAS_BY) {
-            tft_draw_line(64, dy1, 64, dy2 > ADAS_BY ? ADAS_BY : dy2, TFT_GRAY);
+            int y2_val = dy2 > ADAS_BY ? ADAS_BY : dy2;
+            tft_fill_rect(64, dy1, 1, y2_val - dy1 + 1, TFT_GRAY);
         }
     }
 }
@@ -265,7 +269,7 @@ static void draw_footer(void)
                           (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_BG_WARN :
                                                                     TFT_BG_INFO;
             tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, FOOTER_H, bg);
-            tft_draw_line(0, FOOTER_Y, CFG_TFT_WIDTH - 1, FOOTER_Y, TFT_WHITE);
+            tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, 1, TFT_WHITE);
 
             const char *name = (s_alert.type == ALERT_TYPE_EBBL) ? "PHANH GAP!" :
                                (s_alert.type == ALERT_TYPE_TTC)  ? "VA CHAM!"   :
@@ -279,7 +283,7 @@ static void draw_footer(void)
             s_footer_bg_type = s_alert.type;
         } else {
             tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, FOOTER_H, TFT_BG_IDLE);
-            tft_draw_line(0, FOOTER_Y, CFG_TFT_WIDTH - 1, FOOTER_Y, TFT_RGB(30, 80, 50));
+            tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, 1, TFT_RGB(30, 80, 50));
             tft_draw_str(31, FOOTER_Y + 6, "ADAS ACTIVE", TFT_RGB(0, 220, 100), TFT_BG_IDLE, 1);
 
             s_footer_bg_level = ALERT_LEVEL_NONE;
@@ -327,18 +331,27 @@ static void render_frame(void)
     int closest_idx = get_closest_front_peer(&dist_m);
     bool has_target = (closest_idx != -1);
 
-    // Ô tô trước đứng yên cố định ở ty = 65 (chỉ vẽ khi có xe trước qua V2V)
-    int ty = 65;
+    // Ánh xạ khoảng cách xe mục tiêu (dist_m từ 0 - 100m) -> Y (95 - ADAS_HY)
+    int ty = ADAS_HY;
+    if (has_target) {
+        float t = dist_m / CFG_EBBL_MAX_DIST_M;
+        if (t > 1.0f) t = 1.0f;
+        if (t < 0.0f) t = 0.0f;
+        ty = ADAS_HY + (int)((1.0f - t) * (95.0f - (float)ADAS_HY));
+    }
 
     // Phát hiện thay đổi trạng thái để vẽ lại toàn bộ nền khi xe xuất hiện/biến mất hoặc alert đổi màu
+    static int s_last_ty = -1;
     if (s_alert_active != s_last_alert_active || 
         s_alert.level != s_last_alert_level ||
-        has_target != s_last_has_target) 
+        has_target != s_last_has_target ||
+        (has_target && ty != s_last_ty)) 
     {
         s_need_full_redraw = true;
         s_last_alert_active = s_alert_active;
         s_last_alert_level = s_alert.level;
         s_last_has_target = has_target;
+        s_last_ty = has_target ? ty : -1;
     }
 
     if (s_need_full_redraw) {
@@ -429,14 +442,20 @@ static void render_frame(void)
     // 4. Cập nhật trạng thái chỉ báo GPS & Peer & Cảnh báo động ở Footer
     static bool s_last_gps_valid = false;
     static int s_last_peers = -1;
+    static bool s_last_alert_active_footer = false;
+    static alert_level_t s_last_alert_level_footer = ALERT_LEVEL_NONE;
 
     if (s_alert_active ||
+        (s_alert_active != s_last_alert_active_footer) ||
+        (s_alert.level != s_last_alert_level_footer) ||
         (s_ci.ego.gps_valid != s_last_gps_valid) ||
         (s_ci.n_peers != s_last_peers))
     {
         draw_footer();
         s_last_gps_valid = s_ci.ego.gps_valid;
         s_last_peers = s_ci.n_peers;
+        s_last_alert_active_footer = s_alert_active;
+        s_last_alert_level_footer = s_alert.level;
     }
 }
 

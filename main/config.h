@@ -5,7 +5,10 @@
 // #define V2V_HW_STUB      /* Bật để chạy không cần TFT/GPS/IMU thật */
 
 /* Chế độ test: 0 = production, 1 = test mode */
-#define ENABLE_TEST_MODE        0
+#define ENABLE_TEST_MODE        1
+
+/* Vai trò xe trong test mode: 1 = Xe phía trước (Front), 0 = Xe phía sau (Rear) */
+#define TEST_ROLE_FRONT         1
 
 /* In dữ liệu ra UART để vẽ đồ thị (Serial Plotter) */
 #define ENABLE_UART_PLOT        1

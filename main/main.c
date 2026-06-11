@@ -55,9 +55,13 @@ void app_main(void)
 
     /* ── 4. Khởi tạo phần cứng ────────────────────────────────────────── */
     ESP_LOGI(TAG, "Initializing hardware drivers...");
+#if !ENABLE_TEST_MODE
     ESP_ERROR_CHECK(mpu_init());
     ESP_ERROR_CHECK(mpu_calibrate());  /* ~3 s, yêu cầu xe đứng yên */
     ESP_ERROR_CHECK(gps_init());
+#else
+    ESP_LOGI(TAG, "ENABLE_TEST_MODE=1: skipping physical MPU6050 and GPS initialization");
+#endif
 
     /* ── 5. Khởi tạo lớp V2V (ESP-NOW broadcast) ──────────────────────── */
     ESP_ERROR_CHECK(espnow_init(q_v2v_rx));
@@ -68,6 +72,7 @@ void app_main(void)
     /* ── 7. Tạo 7 task theo thứ tự pipeline ──────────────────────────── */
     ESP_LOGI(TAG, "Creating task pipeline...");
 
+#if !ENABLE_TEST_MODE
     xTaskCreatePinnedToCore(task_imu,
                              "imu",
                              CFG_STACK_IMU,
@@ -88,6 +93,7 @@ void app_main(void)
                              NULL, CFG_PRIO_FUSION, NULL,
                              CFG_CORE_FUSION);
     vTaskDelay(pdMS_TO_TICKS(50));
+#endif
 
     xTaskCreatePinnedToCore(task_localization,
                              "localize",
