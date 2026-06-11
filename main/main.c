@@ -29,6 +29,7 @@ void task_localization(void *arg);
 void task_v2v         (void *arg);
 void task_collision   (void *arg);
 void task_display_tft (void *arg);
+void task_buzzer      (void *arg);
 
 void app_main(void)
 {
@@ -114,7 +115,14 @@ void app_main(void)
                              CFG_STACK_DISPLAY_TFT,
                              NULL, CFG_PRIO_DISPLAY_TFT, NULL,
                              CFG_CORE_DISPLAY_TFT);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
-    ESP_LOGI(TAG, "All 7 tasks created — FreeRTOS scheduler running.");
+    xTaskCreatePinnedToCore(task_buzzer,
+                             "buzzer",
+                             CFG_STACK_BUZZER,
+                             NULL, CFG_PRIO_BUZZER, NULL,
+                             CFG_CORE_BUZZER);
+
+    ESP_LOGI(TAG, "All 8 tasks created — FreeRTOS scheduler running.");
     /* app_main trả về; FreeRTOS scheduler tiếp quản. */
 }

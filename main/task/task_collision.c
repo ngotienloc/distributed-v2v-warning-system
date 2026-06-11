@@ -47,6 +47,7 @@ void task_collision(void *arg)
             alert_result_t none = {0};
             none.n_peers = ci.n_peers;
             xQueueSend(q_alert_tft, &none, 0);
+            xQueueSend(q_alert_buzzer, &none, 0);
             continue;
         }
 
@@ -96,5 +97,6 @@ void task_collision(void *arg)
 
         best.n_peers = ci.n_peers;
         xQueueSend(q_alert_tft, &best, 0);
+        xQueueSend(q_alert_buzzer, &best, 0);
     }
 }

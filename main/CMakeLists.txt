@@ -11,6 +11,7 @@ idf_component_register(
         "drivers/imu/i2c_bus.c"
         "drivers/imu/mpu6050.c"
         "drivers/tft/tft_driver.c"
+        "drivers/buzzer/buzzer.c"
 
         # Fusion
         "fusion/complementary_filter/com_fil.c"
@@ -27,6 +28,7 @@ idf_component_register(
         "task/task_imu.c"
         "task/task_localization.c"
         "task/task_v2v.c"
+        "task/task_buzzer.c"
 
         # V2V layer
         "v2v/espnow_comm.c"
@@ -37,6 +39,7 @@ idf_component_register(
         "."
         "drivers/gps"
         "drivers/imu"
+        "drivers/buzzer"
         "task"
         "fusion"
         "v2v"

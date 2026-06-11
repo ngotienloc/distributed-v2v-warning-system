@@ -17,6 +17,7 @@ QueueHandle_t      q_v2v_rx       = NULL;   /* v2v_packet_t,     ESP-NOW → V2V
 QueueHandle_t      q_collision_in = NULL;   /* collision_input_t,V2V → Collision  */
 QueueHandle_t      q_tft_collision = NULL;  /* collision_input_t,V2V → TFT (bản sao) */
 QueueHandle_t      q_alert_tft    = NULL;   /* alert_result_t,   Collision → TFT  */
+QueueHandle_t      q_alert_buzzer = NULL;   /* alert_result_t,   Collision → Buzzer */
 EventGroupHandle_t g_ebbl_evt     = NULL;   /* EBBL_BRAKE_BIT: Fusion → V2V burst */
 
 
@@ -30,16 +31,18 @@ esp_err_t app_queues_init(void)
     q_collision_in  = xQueueCreate(CFG_QLEN_COLLISION_IN, sizeof(collision_input_t));
     q_tft_collision = xQueueCreate(CFG_QLEN_COLLISION_IN, sizeof(collision_input_t));
     q_alert_tft     = xQueueCreate(CFG_QLEN_ALERT,        sizeof(alert_result_t));
+    q_alert_buzzer  = xQueueCreate(CFG_QLEN_ALERT,        sizeof(alert_result_t));
     g_ebbl_evt      = xEventGroupCreate();
 
     /* Kiểm tra tất cả đều được cấp phát thành công */
     if (!q_imu || !q_gps || !q_fusion_out || !q_ego_state ||
             !q_v2v_rx || !q_collision_in || !q_tft_collision ||
-            !q_alert_tft || !g_ebbl_evt) {
+            !q_alert_tft || !q_alert_buzzer || !g_ebbl_evt) {
             ESP_LOGE(TAG, "Queue/EventGroup creation failed! Check heap.");
             return ESP_ERR_NO_MEM;
     }
 
+    /* In thông tin khởi tạo thành công */
     ESP_LOGI(TAG, "All queues created:");
     ESP_LOGI(TAG, "  q_imu          (imu_data_t,      depth=4)");
     ESP_LOGI(TAG, "  q_gps          (gps_data_t,      depth=2)");
@@ -48,5 +51,6 @@ esp_err_t app_queues_init(void)
     ESP_LOGI(TAG, "  q_v2v_rx       (v2v_packet_t,    depth=8)");
     ESP_LOGI(TAG, "  q_collision_in (collision_input_t, depth=2)");
     ESP_LOGI(TAG, "  q_alert_tft    (alert_result_t,  depth=%d)", CFG_QLEN_ALERT);
+    ESP_LOGI(TAG, "  q_alert_buzzer (alert_result_t,  depth=%d)", CFG_QLEN_ALERT);
     return ESP_OK;
 }
