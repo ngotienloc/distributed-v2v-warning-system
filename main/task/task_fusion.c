@@ -78,6 +78,7 @@ void task_fusion(void *arg)
         out.dt             = imu.dt;
         out.gps            = s_last_valid_gps;  /* luôn gửi fix cuối cùng */
         out.gps_updated    = gps_updated;
+        out.gyro_z         = imu.gyro_z;
 
         /* Xả queue cũ trước khi gửi để task_localization nhận dữ liệu mới nhất */
         fusion_output_t stale;

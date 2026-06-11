@@ -157,7 +157,7 @@ void task_localization(void *arg)
         ego.y            = dr.y;
         ego.heading      = fused.orient.heading;
         ego.accel_x_lin  = fused.accel_x_lin;
-        ego.gyro_z       = 0.0f;
+        ego.gyro_z       = fused.gyro_z;
         ego.update_ts_ms = now_ms();
 
         /* Xả queue cũ, gửi snapshot mới nhất */

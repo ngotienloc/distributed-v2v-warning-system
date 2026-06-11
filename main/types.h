@@ -40,6 +40,7 @@ typedef struct {
     float         dt;           /* chu kỳ mẫu (s) */
     gps_data_t    gps;          /* fix GPS cuối cùng hợp lệ */
     bool          gps_updated;  /* true = có fix GPS mới trong chu kỳ này */
+    float         gyro_z;       /* vận tốc góc quay quanh trục Z (rad/s) */
 } fusion_output_t;
 
 /* ── Trạng thái xe (ego hoặc peer) ──────────────────────────────────────

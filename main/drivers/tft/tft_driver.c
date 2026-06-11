@@ -208,6 +208,9 @@ void tft_draw_line(int x0, int y0, int x1, int y1, uint16_t color)
         int e2 = 2 * err;
         if (e2 >= dy) { err += dy; x0 += sx; }
         if (e2 <= dx) { err += dx; y0 += sy; }
+        if ((steps & 63) == 0) {
+            vTaskDelay(0);
+        }
     }
 }
 
