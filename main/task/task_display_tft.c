@@ -3,12 +3,8 @@
  * Chạy ở 10 Hz. Mỗi frame:
  *   1. Drain q_tft_collision → s_ci (danh sách ego + peers).
  *   2. Drain q_alert_tft     → s_alert (cảnh báo hiện tại).
- *   3. Vẽ: radar grid → peers → ego → status bar → footer cảnh báo.
- *
- * Bố cục màn hình:
- *   [0..7px]   Status bar: GPS indicator | Speed | Peer count
- *   [8..119px] Vùng radar: North=up, tỷ lệ 150m/56px
- *   [120..159px] Footer: cảnh báo (màu đỏ/vàng/xanh) hoặc heading + "V2V READY" */
+ *   3. Vẽ tối ưu: chỉ vẽ đè phần động, xe và mặt đường đứng yên.
+ */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_queues.h"
@@ -21,29 +17,31 @@
 #include <math.h>
 #include <stdio.h>
 
-
 static const char *TAG = "task_tft";
 
-/* ── Hằng số hình học radar ──────────────────────────────────────────── */
-#define RADAR_CX      64          /* tâm radar X (px) */
-#define RADAR_CY      64          /* tâm radar Y (px) */
-#define RADAR_R       56          /* bán kính radar (px) */
-#define RADAR_SCALE_M 150.0f      /* 150m ↔ RADAR_R px */
-
-/* Chuyển ENU (m) → tọa độ màn hình (North = lên = -Y màn hình) */
-#define ENUx_TO_SCR(px) ((int)(RADAR_CX + (px) * RADAR_R / RADAR_SCALE_M))
-#define ENUy_TO_SCR(py) ((int)(RADAR_CY - (py) * RADAR_R / RADAR_SCALE_M))
+/* ── Hằng số hình học ADAS 3D Road ───────────────────────────────────── */
+#define ADAS_HY       25          /* Điểm chân trời Y (Horizon Y) */
+#define ADAS_BY       120         /* Điểm đáy đường Y (Bottom Y) */
+#define ADAS_H_SPAN   95          /* Chiều cao vùng đường (120 - 25) */
+#define ADAS_MAX_W    49          /* Bán độ rộng lớn nhất của đường ở đáy */
 
 /* Phân vùng màn hình */
-#define STATUSBAR_H   8
+#define STATUSBAR_H   0           /* Bỏ thanh trạng thái phía trên */
 #define FOOTER_Y      120
 #define FOOTER_H      (CFG_TFT_HEIGHT - FOOTER_Y)  /* 40px */
 
 /* ── Trạng thái nội bộ ───────────────────────────────────────────────── */
-static collision_input_t s_ci          = {0};
-static alert_result_t    s_alert       = {0};
-static bool              s_alert_active = false;
-static uint32_t          s_alert_until  = 0;  /* hiển thị cảnh báo tối thiểu 2 giây */
+static collision_input_t s_ci              = {0};
+static alert_result_t    s_alert           = {0};
+static bool              s_alert_active     = false;
+static uint32_t          s_alert_until      = 0;  /* hiển thị cảnh báo tối thiểu 2 giây */
+static uint8_t           s_frame_cnt        = 0;  /* Biến đếm khung hình để tạo hoạt ảnh */
+
+/* Trạng thái lưu vết render */
+static bool              s_need_full_redraw = true;
+static bool              s_last_alert_active = false;
+static alert_level_t     s_last_alert_level = ALERT_LEVEL_NONE;
+static bool              s_last_has_target  = false;
 
 static uint32_t now_ms(void)
 {
@@ -58,9 +56,7 @@ static void refresh_state(void)
     while (xQueueReceive(q_tft_collision, &tmp_ci, 0) == pdTRUE)
         s_ci = tmp_ci;
 
-    /* Chuyển đổi lat/lon của từng peer sang ENU (m) lấy ego làm gốc.
-     * ego.lat/lon có thể = 0 khi GPS chưa có fix — các peer sẽ nằm ở tâm
-     * nhưng được render_frame() bỏ qua nếu !gps_valid. */
+    /* Chuyển đổi lat/lon của từng peer sang ENU (m) lấy ego làm gốc. */
     if (s_ci.ego.gps_valid) {
         for (int i = 0; i < s_ci.n_peers && i < COLLISION_MAX_PEERS; i++) {
             if (!s_ci.peers[i].gps_valid) continue;
@@ -84,133 +80,364 @@ static void refresh_state(void)
         s_alert_active = false;
 }
 
-
-/* ── Màu chấm peer dựa theo mức cảnh báo ────────────────────────────── */
-static uint16_t peer_color(int peer_idx)
+/* ── Tìm kiếm xe trước gần nhất ──────────────────────────────────────── */
+static int get_closest_front_peer(float *out_dist)
 {
-    /* Peer là nguồn gây cảnh báo → tô màu theo mức */
-    if (s_alert_active &&
-        memcmp(s_ci.peers[peer_idx].id, s_alert.peer_id, 4) == 0) {
-        return (s_alert.level == ALERT_LEVEL_CRITICAL) ? TFT_DOT_CRIT :
-               (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_DOT_WARN :
-                                                          TFT_DOT_INFO;
+    int closest_idx = -1;
+    float min_dist = 999.0f;
+    for (int i = 0; i < s_ci.n_peers && i < COLLISION_MAX_PEERS; i++) {
+        if (!s_ci.peers[i].gps_valid) continue;
+        float dx = s_ci.peers[i].x;
+        float dy = s_ci.peers[i].y;
+        float dist = sqrtf(dx*dx + dy*dy);
+        // Kiểm tra xe phía trước: dy > 0 và nằm tương đối thẳng phía trước (dx < 15m)
+        if (dy > 0.0f && fabs(dx) < 15.0f && dist < min_dist) {
+            min_dist = dist;
+            closest_idx = i;
+        }
     }
-    return TFT_DOT_SAFE;  /* an toàn → xanh lá */
+    if (closest_idx != -1) {
+        *out_dist = min_dist;
+    }
+    return closest_idx;
 }
 
-/* Vẽ xe ego: hình tròn xanh + mũi tên hướng đi */
-static void draw_ego(float heading)
+/* ── Vẽ bầu trời (Sky & Horizon Line) ────────────────────────────────── */
+static void draw_sky_scenery(void)
 {
-    tft_fill_circle(RADAR_CX, RADAR_CY, 5, TFT_DOT_SELF);
+    // Đường chân trời mờ màu xanh xám ngăn cách bầu trời
+    tft_draw_line(0, ADAS_HY - 1, CFG_TFT_WIDTH - 1, ADAS_HY - 1, TFT_RGB(35, 45, 60));
 
-    /* Mũi tên 12px theo hướng heading (CW từ North) */
-    int ax = RADAR_CX + (int)(12.0f * sinf(heading));
-    int ay = RADAR_CY - (int)(12.0f * cosf(heading));
-    tft_draw_line(RADAR_CX, RADAR_CY, ax, ay, TFT_WHITE);
+    // Vẽ 4 ngôi sao nhỏ cố định trên trời đêm
+    uint16_t star_color = TFT_RGB(150, 170, 200);
+    tft_draw_pixel(15, 12, star_color);
+    tft_draw_pixel(45, 8, star_color);
+    tft_draw_pixel(85, 10, star_color);
+    tft_draw_pixel(110, 6, star_color);
 }
 
-/* Vẽ một xe peer: hình tròn + tick hướng */
-static void draw_peer(const vehicle_state_t *peer, uint16_t color)
+/* ── Vẽ mặt đường 3D (3D Road Surface) ──────────────────────────────── */
+static void draw_road_surface(void)
 {
-    int sx = ENUx_TO_SCR(peer->x);
-    int sy = ENUy_TO_SCR(peer->y);
-
-    /* Bỏ qua nếu ngoài vùng radar */
-    if (sx < 0 || sx >= CFG_TFT_WIDTH) return;
-    if (sy < STATUSBAR_H || sy >= FOOTER_Y) return;
-
-    tft_fill_circle(sx, sy, 4, color);
-
-    int tx = sx + (int)(8.0f * sinf(peer->heading));
-    int ty = sy - (int)(8.0f * cosf(peer->heading));
-    tft_draw_line(sx, sy, tx, ty, TFT_WHITE);
+    for (int y = ADAS_HY; y <= ADAS_BY; y++) {
+        float t = (float)(y - ADAS_HY) / (float)ADAS_H_SPAN;
+        int half_w = (int)(t * (float)ADAS_MAX_W);
+        tft_draw_line(64 - half_w, y, 64 + half_w, y, TFT_RGB(25, 28, 32));
+    }
 }
 
-/* Vẽ lưới radar: chữ thập + nhãn "N" */
-static void draw_radar_grid(void)
+/* ── Vẽ vùng cảnh báo nguy hiểm dạng khối tĩnh (Warning Corridor) ───── */
+static void draw_road_corridor(int ty)
 {
-    tft_draw_line(RADAR_CX, STATUSBAR_H,
-                  RADAR_CX, FOOTER_Y - 1, TFT_RGB(25, 40, 55));
-    tft_draw_line(0, RADAR_CY, CFG_TFT_WIDTH - 1,
-                  RADAR_CY, TFT_RGB(25, 40, 55));
-    tft_draw_char(RADAR_CX - 2, STATUSBAR_H + 1, 'N',
-                  TFT_GRAY, TFT_BG_IDLE, 1);
+    int y_start = ty > ADAS_HY ? ty : ADAS_HY;
+    int y_end = 95; // Dừng ngay sát đầu xe Ego
+
+    if (y_start >= y_end) return;
+
+    if (s_alert_active) {
+        uint16_t color = (s_alert.level == ALERT_LEVEL_CRITICAL) ? TFT_RGB(255, 30, 30) :
+                         (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_RGB(255, 140, 0) :
+                                                                   TFT_RGB(255, 230, 0);
+
+        for (int y = y_start; y <= y_end; y++) {
+            float t = (float)(y - ADAS_HY) / (float)ADAS_H_SPAN;
+            int half_w = (int)(t * (float)ADAS_MAX_W);
+            tft_draw_line(64 - half_w, y, 64 + half_w, y, color);
+        }
+    }
 }
 
-/* Vẽ status bar (8px trên cùng): GPS LED | tốc độ | số peer */
-static void draw_statusbar(const vehicle_state_t *ego, int n_peers)
+/* ── Vẽ xe Ego Truck (Ego Vehicle) ──────────────────────────────────── */
+static void draw_ego_car(void)
 {
-    tft_fill_rect(0, 0, CFG_TFT_WIDTH, STATUSBAR_H, TFT_RGB(15, 25, 45));
+    // Bánh sau
+    tft_fill_rect(48, 107, 4, 8, TFT_BLACK);
+    tft_fill_rect(76, 107, 4, 8, TFT_BLACK);
+    // Bánh trước
+    tft_fill_rect(50, 97, 3, 5, TFT_BLACK);
+    tft_fill_rect(75, 97, 3, 5, TFT_BLACK);
 
-    /* Chỉ báo GPS: xanh = có fix, đỏ = mất GPS */
-    uint16_t gps_col = ego->gps_valid ? TFT_RGB(0, 200, 80) :
-                                        TFT_RGB(200, 50, 50);
-    tft_fill_rect(1, 1, 5, 6, gps_col);
+    // Thân xe chính (Bumper/Chassis)
+    tft_fill_rect(50, 102, 28, 11, TFT_RGB(65, 75, 85));
+    // Cabin
+    tft_fill_rect(53, 94, 22, 8, TFT_RGB(85, 100, 115));
+    // Kính sau
+    tft_fill_rect(56, 96, 16, 4, TFT_BLACK);
+    // Biển số xe
+    tft_fill_rect(60, 109, 8, 3, TFT_YELLOW);
 
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%3dkm/h", (int)(ego->velocity * 3.6f));
-    tft_draw_str(8, 1, buf, TFT_CYAN, TFT_RGB(15, 25, 45), 1);
-
-    snprintf(buf, sizeof(buf), "N:%d", n_peers);
-    tft_draw_str(CFG_TFT_WIDTH - 24, 1, buf,
-                 TFT_DOT_SAFE, TFT_RGB(15, 25, 45), 1);
+    // Đèn phanh hậu (Sáng đỏ rực khi có cảnh báo)
+    if (s_alert_active) {
+        tft_fill_rect(50, 102, 5, 4, TFT_RGB(255, 0, 0));
+        tft_fill_rect(73, 102, 5, 4, TFT_RGB(255, 0, 0));
+    } else {
+        tft_fill_rect(51, 103, 4, 3, TFT_RGB(150, 20, 20));
+        tft_fill_rect(73, 103, 4, 3, TFT_RGB(150, 20, 20));
+    }
 }
 
-/* Vẽ footer (40px dưới cùng): cảnh báo hoặc heading + trạng thái */
+/* ── Vẽ xe mục tiêu phía trước (Target Car) ───────────────────────────── */
+static void draw_target_car(int ty, uint16_t color)
+{
+    float scale = (float)(ty - ADAS_HY) / (float)ADAS_H_SPAN;
+    if (scale < 0.0f) scale = 0.0f;
+    if (scale > 1.0f) scale = 1.0f;
+
+    int w = 6 + (int)(scale * 14.0f);
+    int h = 4 + (int)(scale * 8.0f);
+
+    // Bánh xe
+    if (w >= 10) {
+        int tw_w = w / 6;
+        if (tw_w < 1) tw_w = 1;
+        tft_fill_rect(64 - w/2 - tw_w, ty - h + 2, tw_w, h - 2, TFT_BLACK);
+        tft_fill_rect(64 + w/2,         ty - h + 2, tw_w, h - 2, TFT_BLACK);
+    }
+
+    // Khung gầm
+    tft_fill_rect(64 - w / 2, ty - h, w, h, color);
+    
+    // Cabin
+    int cw = (w * 2) / 3;
+    int ch = h / 2;
+    if (ch < 2) ch = 2;
+    tft_fill_rect(64 - cw / 2, ty - h - ch, cw, ch, TFT_RGB(35, 45, 55));
+    
+    // Đèn hậu
+    if (w >= 8) {
+        int lw = w / 5;
+        if (lw < 1) lw = 1;
+        tft_fill_rect(64 - w / 2 + 1, ty - h + 1, lw, 2, TFT_RGB(255, 40, 40));
+        tft_fill_rect(64 + w / 2 - 1 - lw, ty - h + 1, lw, 2, TFT_RGB(255, 40, 40));
+    }
+}
+
+/* ── Xóa và vẽ lại vạch đứt tâm đường động nhanh ──────────────────────── */
+static void erase_and_redraw_center_lanes(int ty, bool has_target)
+{
+    // 1. Vẽ đè đường thẳng tâm bằng màu nền tương ứng để xóa vạch đứt cũ
+    int y_warn_start = (s_alert_active && has_target) ? ty : 95;
+    if (y_warn_start < ADAS_HY) y_warn_start = ADAS_HY;
+
+    // Phân đoạn trên: xóa bằng màu đường xám
+    tft_draw_line(64, ADAS_HY, 64, y_warn_start - 1, TFT_RGB(25, 28, 32));
+
+    // Phân đoạn cảnh báo: xóa bằng màu cảnh báo hiện tại
+    if (s_alert_active && has_target && y_warn_start < 95) {
+        uint16_t warn_color = (s_alert.level == ALERT_LEVEL_CRITICAL) ? TFT_RGB(255, 30, 30) :
+                              (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_RGB(255, 140, 0) :
+                                                                        TFT_RGB(255, 230, 0);
+        tft_draw_line(64, y_warn_start, 64, 95, warn_color);
+    }
+
+    // Phân đoạn dưới: xóa bằng màu đường xám
+    tft_draw_line(64, 96, 64, ADAS_BY, TFT_RGB(25, 28, 32));
+
+    // 2. Vẽ các vạch đứt tâm mới di chuyển (Road motion)
+    for (int i = 0; i < 3; i++) {
+        float u = (float)((s_frame_cnt * 3 + i * 20) % 60) / 60.0f;
+        int dy1 = ADAS_HY + (int)(u * u * (float)ADAS_H_SPAN);
+        float u_next = u + 0.06f;
+        if (u_next > 1.0f) u_next = 1.0f;
+        int dy2 = ADAS_HY + (int)(u_next * u_next * (float)ADAS_H_SPAN);
+
+        if (dy1 < ADAS_BY) {
+            tft_draw_line(64, dy1, 64, dy2 > ADAS_BY ? ADAS_BY : dy2, TFT_GRAY);
+        }
+    }
+}
+
+/* ── Vẽ footer trạng thái & cảnh báo tối ước không nháy ─────────────────── */
 static void draw_footer(void)
 {
+    static bool s_footer_bg_drawn = false;
+    static alert_level_t s_footer_bg_level = ALERT_LEVEL_NONE;
+    static alert_type_t s_footer_bg_type = (alert_type_t)-1;
+
+    // Chỉ vẽ lại nền footer khi trạng thái cảnh báo thay đổi (tránh chớp nháy vùng chữ tĩnh)
+    bool need_bg_redraw = s_need_full_redraw || !s_footer_bg_drawn ||
+                          (s_alert_active && (s_alert.level != s_footer_bg_level || s_alert.type != s_footer_bg_type)) ||
+                          (!s_alert_active && s_footer_bg_level != ALERT_LEVEL_NONE);
+
+    if (need_bg_redraw) {
+        if (s_alert_active) {
+            uint16_t bg = (s_alert.level == ALERT_LEVEL_CRITICAL) ? TFT_BG_CRIT :
+                          (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_BG_WARN :
+                                                                    TFT_BG_INFO;
+            tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, FOOTER_H, bg);
+            tft_draw_line(0, FOOTER_Y, CFG_TFT_WIDTH - 1, FOOTER_Y, TFT_WHITE);
+
+            const char *name = (s_alert.type == ALERT_TYPE_EBBL) ? "PHANH GAP!" :
+                               (s_alert.type == ALERT_TYPE_TTC)  ? "VA CHAM!"   :
+                                                                   "CAUTION";
+            int name_len = strlen(name);
+            int name_x = (CFG_TFT_WIDTH - name_len * 12 + 2) / 2;
+            if (name_x < 0) name_x = 4;
+            tft_draw_str(name_x, FOOTER_Y + 4, name, TFT_WHITE, bg, 2);
+
+            s_footer_bg_level = s_alert.level;
+            s_footer_bg_type = s_alert.type;
+        } else {
+            tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, FOOTER_H, TFT_BG_IDLE);
+            tft_draw_line(0, FOOTER_Y, CFG_TFT_WIDTH - 1, FOOTER_Y, TFT_RGB(30, 80, 50));
+            tft_draw_str(31, FOOTER_Y + 6, "ADAS ACTIVE", TFT_RGB(0, 220, 100), TFT_BG_IDLE, 1);
+
+            s_footer_bg_level = ALERT_LEVEL_NONE;
+            s_footer_bg_type = (alert_type_t)-1;
+        }
+        s_footer_bg_drawn = true;
+    }
+
+    // Luôn vẽ đè các nội dung động (sử dụng chế độ vẽ đè chữ có màu nền để không nhấp nháy)
     if (s_alert_active) {
-        /* Nền màu theo mức cảnh báo */
         uint16_t bg = (s_alert.level == ALERT_LEVEL_CRITICAL) ? TFT_BG_CRIT :
                       (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_BG_WARN :
                                                                 TFT_BG_INFO;
-        tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, FOOTER_H, bg);
-
-        const char *name = (s_alert.type == ALERT_TYPE_EBBL) ? "PHANH GAP!" :
-                           (s_alert.type == ALERT_TYPE_TTC)  ? "VA CHAM!"   :
-                                                               "CAUTION";
-        tft_draw_str(4, FOOTER_Y + 2, name, TFT_WHITE, bg, 2);
-
-        char mbuf[20];
-        snprintf(mbuf, sizeof(mbuf), "TTC %.1fs %.0fm",
-                 s_alert.ttc_s, s_alert.dist_m);
-        tft_draw_str(4, FOOTER_Y + 20, mbuf, TFT_WHITE, bg, 1);
-
+        char mbuf[24];
+        snprintf(mbuf, sizeof(mbuf), "TTC %.1fs  Dist %3.0fm", s_alert.ttc_s, s_alert.dist_m);
+        int m_len = strlen(mbuf);
+        int m_x = (CFG_TFT_WIDTH - m_len * 6 + 1) / 2;
+        if (m_x < 0) m_x = 4;
+        tft_draw_str(m_x, FOOTER_Y + 24, mbuf, TFT_WHITE, bg, 1);
     } else {
-        /* Idle: hiển thị heading và trạng thái hệ thống */
-        tft_fill_rect(0, FOOTER_Y, CFG_TFT_WIDTH, FOOTER_H, TFT_BG_IDLE);
-        char buf[20];
-        float hdg = s_ci.ego.heading * 57.2957795f;
-        if (hdg < 0) hdg += 360.0f;
-        snprintf(buf, sizeof(buf), "HDG %.0f deg", hdg);
-        tft_draw_str(4, FOOTER_Y + 4,  buf, TFT_ACCENT, TFT_BG_IDLE, 1);
-        tft_draw_str(4, FOOTER_Y + 16, "V2V READY", TFT_DOT_SAFE, TFT_BG_IDLE, 1);
+        // GPS: màu Xanh lá nếu có gps nhận được, màu Đỏ nếu không nhận được
+        uint16_t gps_col = s_ci.ego.gps_valid ? TFT_RGB(0, 220, 100) : TFT_RGB(255, 50, 50);
+        tft_draw_str(8, FOOTER_Y + 21, "GPS", gps_col, TFT_BG_IDLE, 1);
+
+        char n_buf[10];
+        snprintf(n_buf, sizeof(n_buf), "N:%2d", s_ci.n_peers);
+        tft_draw_str(CFG_TFT_WIDTH - 36, FOOTER_Y + 21, n_buf, TFT_DOT_SAFE, TFT_BG_IDLE, 1);
     }
 }
 
-/* ── Vẽ một frame hoàn chỉnh ────────────────────────────────────────── */
+/* ── Vẽ một frame hoàn chỉnh theo lớp (Layer-based rendering) ────────── */
 static void render_frame(void)
 {
-    /* Chỉ xóa vùng radar (tránh full-clear → nhanh hơn) */
-    tft_fill_rect(0, STATUSBAR_H,
-                  CFG_TFT_WIDTH, FOOTER_Y - STATUSBAR_H,
-                  TFT_BG_IDLE);
-
-    draw_radar_grid();
-    vTaskDelay(1);  /* yield để tránh WDT */
-
-    for (int i = 0; i < s_ci.n_peers && i < COLLISION_MAX_PEERS; i++) {
-        if (!s_ci.peers[i].gps_valid) continue;
-        draw_peer(&s_ci.peers[i], peer_color(i));
-        if ((i & 3) == 3) vTaskDelay(1);  /* yield định kỳ */
+    static bool s_first_frame = true;
+    if (s_first_frame) {
+        tft_clear(TFT_BG_IDLE);
+        s_first_frame = false;
+        s_need_full_redraw = true;
     }
 
-    draw_ego(s_ci.ego.heading);
-    vTaskDelay(1);
+    s_frame_cnt++;
 
-    draw_statusbar(&s_ci.ego, s_ci.n_peers);
-    draw_footer();
-    vTaskDelay(1);
+    // Tìm xe mục tiêu phía trước gần nhất
+    float dist_m = 999.0f;
+    int closest_idx = get_closest_front_peer(&dist_m);
+    bool has_target = (closest_idx != -1);
+
+    // Ô tô trước đứng yên cố định ở ty = 65 (chỉ vẽ khi có xe trước qua V2V)
+    int ty = 65;
+
+    // Phát hiện thay đổi trạng thái để vẽ lại toàn bộ nền khi xe xuất hiện/biến mất hoặc alert đổi màu
+    if (s_alert_active != s_last_alert_active || 
+        s_alert.level != s_last_alert_level ||
+        has_target != s_last_has_target) 
+    {
+        s_need_full_redraw = true;
+        s_last_alert_active = s_alert_active;
+        s_last_alert_level = s_alert.level;
+        s_last_has_target = has_target;
+    }
+
+    if (s_need_full_redraw) {
+        // Lớp 0: Bầu trời phía trên chân trời & sao
+        draw_sky_scenery();
+
+        // Lớp 1: Mặt đường 3D
+        draw_road_surface();
+
+        // Lớp 2: Vùng nguy hiểm cảnh báo (corridor) - Chỉ vẽ khi phát hiện có xe trước
+        if (has_target) {
+            draw_road_corridor(ty);
+        }
+
+        // Lớp 3: Đường biên và các vạch viền
+        tft_draw_line(64, ADAS_HY, 64 - ADAS_MAX_W, ADAS_BY, TFT_RGB(0, 180, 220));
+        tft_draw_line(64, ADAS_HY, 64 + ADAS_MAX_W, ADAS_BY, TFT_RGB(0, 180, 220));
+
+        // Lớp 4: Xe trước cố định vị trí đứng yên (Chỉ vẽ khi có xe thực tế nhận từ V2V)
+        if (has_target) {
+            uint16_t car_color = TFT_RGB(160, 170, 180);
+            if (s_alert_active) {
+                car_color = (s_alert.level == ALERT_LEVEL_CRITICAL) ? TFT_RGB(255, 30, 30) :
+                            (s_alert.level == ALERT_LEVEL_WARNING)  ? TFT_RGB(255, 140, 0) :
+                                                                      TFT_RGB(255, 230, 0);
+            }
+            draw_target_car(ty, car_color);
+        }
+
+        // Lớp 5: Xe của mình (Ego Car) cố định vị trí đứng yên ở đáy đường
+        draw_ego_car();
+
+        // Lớp 6: Cung đồng hồ đo sườn trang trí
+        tft_draw_line(12, 50, 4, 70, TFT_RGB(30, 50, 75));
+        tft_draw_line(4, 70, 4, 90, TFT_RGB(30, 50, 75));
+        tft_draw_line(4, 90, 12, 110, TFT_RGB(30, 50, 75));
+        tft_draw_line(115, 50, 123, 70, TFT_RGB(30, 50, 75));
+        tft_draw_line(123, 70, 123, 90, TFT_RGB(30, 50, 75));
+        tft_draw_line(123, 90, 115, 110, TFT_RGB(30, 50, 75));
+        tft_draw_str(10, 90, "HDG", TFT_GRAY, TFT_BG_IDLE, 1);
+        tft_draw_str(106, 88, "km/h", TFT_GRAY, TFT_BG_IDLE, 1);
+
+        s_need_full_redraw = false;
+    }
+
+    // --- Cập nhật động cực nhanh (Fast Update Path) ---
+
+    // 1. Xóa và vẽ lại làn đường đứt quãng ở tâm đường (Không gây quét hình)
+    erase_and_redraw_center_lanes(ty, has_target);
+
+    // 2. Cập nhật tốc độ xe (chỉ vẽ đè số khi thay đổi)
+    static int s_last_speed = -1;
+    int speed_kmh = (int)(s_ci.ego.velocity * 3.6f);
+    if (speed_kmh != s_last_speed) {
+        char spd_str[4];
+        snprintf(spd_str, sizeof(spd_str), "%3d", speed_kmh);
+        tft_draw_str(86, 70, spd_str, TFT_WHITE, TFT_BG_IDLE, 2);
+        s_last_speed = speed_kmh;
+    }
+
+    // 3. Cập nhật góc hướng xe HDG (chỉ vẽ đè số và ký tự hướng khi thay đổi)
+    static int s_last_hdg = -1;
+    int hdg_deg = (int)(s_ci.ego.heading * 57.29578f);
+    hdg_deg = (hdg_deg % 360 + 360) % 360;
+
+    if (hdg_deg != s_last_hdg || s_need_full_redraw) {
+        const char *comp = "N ";
+        if (hdg_deg >= 338 || hdg_deg < 23)        comp = "N ";
+        else if (hdg_deg >= 23  && hdg_deg < 68)   comp = "NE";
+        else if (hdg_deg >= 68  && hdg_deg < 113)  comp = "E ";
+        else if (hdg_deg >= 113 && hdg_deg < 158)  comp = "SE";
+        else if (hdg_deg >= 158 && hdg_deg < 203)  comp = "S ";
+        else if (hdg_deg >= 203 && hdg_deg < 248)  comp = "SW";
+        else if (hdg_deg >= 248 && hdg_deg < 293)  comp = "W ";
+        else                                       comp = "NW";
+
+        // Vẽ chữ hướng la bàn (Scale 2, màu cam/vàng)
+        tft_draw_str(7, 70, comp, TFT_RGB(255, 160, 0), TFT_BG_IDLE, 2);
+
+        // Vẽ góc hướng dạng số (Scale 1) ở góc trên cung trái
+        char hdg_str[5];
+        snprintf(hdg_str, sizeof(hdg_str), "%3d", hdg_deg);
+        tft_draw_str(4, 54, hdg_str, TFT_GRAY, TFT_BG_IDLE, 1);
+
+        s_last_hdg = hdg_deg;
+    }
+
+    // 4. Cập nhật trạng thái chỉ báo GPS & Peer & Cảnh báo động ở Footer
+    static bool s_last_gps_valid = false;
+    static int s_last_peers = -1;
+
+    if (s_alert_active ||
+        (s_ci.ego.gps_valid != s_last_gps_valid) ||
+        (s_ci.n_peers != s_last_peers))
+    {
+        draw_footer();
+        s_last_gps_valid = s_ci.ego.gps_valid;
+        s_last_peers = s_ci.n_peers;
+    }
 }
 
 /* ── Màn hình boot splash ────────────────────────────────────────────── */
