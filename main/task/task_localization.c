@@ -100,12 +100,19 @@ void task_localization(void *arg)
 
             bool pressed = (gpio_get_level(GPIO_NUM_0) == 0);
             if (pressed) {
-                // Phanh gấp: giảm tốc độ với gia tốc -8.0 m/s2, tối thiểu 2.0 m/s
-                v_front -= 8.0f * 0.10f;
-                if (v_front < 2.0f) v_front = 2.0f;
-                ego.accel_x_lin = -8.0f;
-                xEventGroupSetBits(g_ebbl_evt, EBBL_BRAKE_BIT);
-                ESP_LOGW(TAG, "BOOT button pressed - Front vehicle Braking! speed=%.1f km/h, dist=%.1f m", v_front * 3.6f, relative_offset);
+                if (v_front > 0.0f) {
+                    // Phanh gấp: giảm tốc độ với gia tốc -8.0 m/s2, tối thiểu 0.0 m/s
+                    v_front -= 8.0f * 0.10f;
+                    if (v_front < 0.0f) v_front = 0.0f;
+                    ego.accel_x_lin = -8.0f;
+                    xEventGroupSetBits(g_ebbl_evt, EBBL_BRAKE_BIT);
+                    ESP_LOGW(TAG, "BOOT button pressed - Front vehicle Braking! speed=%.1f km/h, dist=%.1f m", v_front * 3.6f, relative_offset);
+                } else {
+                    // Đã dừng hẳn: không còn phanh nữa (accel = 0.0)
+                    v_front = 0.0f;
+                    ego.accel_x_lin = 0.0f;
+                    ESP_LOGW(TAG, "Front vehicle STOPPED (no longer braking), Rear vehicle is approaching! dist=%.1f m", relative_offset);
+                }
             } else {
                 // Nhả nút: tăng tốc trở lại 30 m/s với gia tốc 4.0 m/s2
                 v_front += 4.0f * 0.10f;
