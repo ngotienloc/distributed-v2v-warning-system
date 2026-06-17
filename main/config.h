@@ -130,8 +130,17 @@
 #define CFG_CF_WARMUP_TICKS     50      /* số chu kỳ khởi động trước khi loại trọng lực */
 
 /* ── Fuse heading GPS + IMU ──────────────────────────────────────────── */
-#define CFG_HDG_GPS_ALPHA       0.10f   /* trọng số GPS khi fuse heading */
-#define CFG_HDG_MIN_SPEED_MS    0.5f    /* tốc độ tối thiểu để GPS heading tin cậy */
+/* Alpha = trọng số kéo IMU heading về phía GPS course mỗi fix.
+ *   0.10 (cũ) → hội tụ chậm, mất ~1s để correction 65% khi GPS 10Hz.
+ *   0.30 (mới) → hội tụ nhanh hơn 3×; đủ mạnh chống gyro drift mà
+ *                không bị GPS multi-path kéo sai nếu tốc độ đủ lớn.
+ * Nếu vẫn dao động nhiều → thử tăng lên 0.40 (tối đa khuyến nghị 0.50). */
+#define CFG_HDG_GPS_ALPHA       0.30f   /* trọng số GPS khi fuse heading (tăng từ 0.10) */
+
+/* Ngưỡng tốc độ để GPS course được coi là đáng tin.
+ *   0.5 m/s (cũ) ≈ 1.8 km/h — quá thấp, GPS course rất nhiễu khi đi chậm.
+ *   1.5 m/s (mới) ≈ 5.4 km/h — xe phải thực sự chuyển động để dùng GPS heading. */
+#define CFG_HDG_MIN_SPEED_MS    1.5f    /* tốc độ tối thiểu để GPS heading tin cậy (tăng từ 0.5) */
 
 /* ── Dead Reckoning ──────────────────────────────────────────────────── */
 #define CFG_ZVU_SPEED_MS        0.3f    /* ngưỡng Zero Velocity Update (m/s) — lọc nhiễu IMU khi đứng yên */

@@ -85,17 +85,34 @@ static void refresh_state(void)
 }
 
 /* ── Tìm kiếm xe trước gần nhất ──────────────────────────────────────── */
+/* dx/dy từ geo_latlon_to_enu() là tọa độ ENU tuyệt đối (East-North).
+ * Cần xoay về Body frame (trục dọc = hướng mũi xe) để kiểm tra
+ * đúng "phía trước xe" bất kể xe đang quay về hướng địa lý nào. */
 static int get_closest_front_peer(float *out_dist)
 {
     int closest_idx = -1;
     float min_dist = 999.0f;
+
+    /* Xoay ENU → Body frame theo heading ego.
+     * heading = 0 → North ≡ ENU (không đổi gì).
+     * heading = π/2 (East) → trục dọc xe khớp trục East của ENU. */
+    float cos_h = cosf(s_ci.ego.heading);
+    float sin_h = sinf(s_ci.ego.heading);
+
     for (int i = 0; i < s_ci.n_peers && i < COLLISION_MAX_PEERS; i++) {
         if (!s_ci.peers[i].gps_valid) continue;
-        float dx = s_ci.peers[i].x;
-        float dy = s_ci.peers[i].y;
+        float dx = s_ci.peers[i].x;   /* East offset (m) */
+        float dy = s_ci.peers[i].y;   /* North offset (m) */
         float dist = sqrtf(dx*dx + dy*dy);
-        // Kiểm tra xe phía trước: dy > 0 và nằm tương đối thẳng phía trước (dx < 15m)
-        if (dy > 0.0f && fabs(dx) < 15.0f && dist < min_dist) {
+
+        /* Chiếu sang body frame:
+         *   dy_body > 0 → peer ở phía trước mũi xe
+         *   dx_body     → lệch ngang (dương = bên phải xe) */
+        float dx_body =  dx * cos_h + dy * sin_h;
+        float dy_body = -dx * sin_h + dy * cos_h;
+
+        /* Xe phía trước: thẳng phía trước (dy_body > 0) và cùng làn (|dx_body| < 15m) */
+        if (dy_body > 0.0f && fabsf(dx_body) < 15.0f && dist < min_dist) {
             min_dist = dist;
             closest_idx = i;
         }
