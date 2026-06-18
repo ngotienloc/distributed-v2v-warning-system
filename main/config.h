@@ -1,15 +1,9 @@
 #pragma once
 
 /* ═══════════════════════════════════════════════════════════════
- * CHỌN CHẾ ĐỘ HIỂN THỊ
- *   - Comment dòng dưới  → dùng TFT ST7735 (board có màn hình)
- *   - Uncomment dòng dưới → dùng UART log  (board không có TFT)
- * ════════════════════════════════════════════════════════════════ */
- //#define V2V_NO_TFT   /* ← Bỏ dấu // nếu board không có TFT */
-
-/* ═══════════════════════════════════════════════════════════════
- * config.h — Test 2.3: ESP-NOW Range Test
- * Chỉ giữ lại: TFT (ST7735), ESP-NOW, nút nhấn (BOOT/GPIO0).
+ * config.h — Test 2.3: ESP-NOW Range Test (Symmetric / Both-TFT)
+ * Cả 2 board đều dùng TFT ST7735. Flash cùng 1 firmware cho cả 2.
+ * Bên nào nhấn BOOT trước → TX burst 500 gói, bên kia nhận + hiển thị.
  * ═══════════════════════════════════════════════════════════════ */
 
 /* ── TFT ST7735 (SPI) ────────────────────────────────────────────────── */
