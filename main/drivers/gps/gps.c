@@ -81,15 +81,16 @@ static void ubx_disable_nmea(uint8_t nmea_cls, uint8_t nmea_id)
  *   2. Tắt GGA, GLL, GSA, GSV, VTG
  *   3. Đặt chu kỳ đo 200 ms = 5 Hz (UBX-CFG-RATE)
  * Gọi khi ESP32 UART vẫn ở 9600 baud (CFG_GPS_UART_BAUD_BOOT). */
+#if GPS_MODEL == GPS_MODEL_NEO6M
 static void gps_neo6m_configure(void)
 {
-    /* ── Bước 1: Đổi baud NEO-6M → 38400 (UBX-CFG-PRT, UART1, 20 byte) ── */
+    /* ── Bước 1: Đổi baud NEO-6M → 115200 (UBX-CFG-PRT, UART1, 20 byte) ── */
     const uint8_t cfg_prt[20] = {
         0x01,                          /* portID = UART1              */
         0x00,                          /* reserved1                   */
         0x00, 0x00,                    /* txReady = disabled          */
         0xC0, 0x08, 0x00, 0x00,       /* mode = 8N1                  */
-        0x00, 0x96, 0x00, 0x00,       /* baudRate = 38400 (0x9600, little-endian) */
+        0x00, 0xC2, 0x01, 0x00,       /* baudRate = 115200 (little-endian) */
         0x07, 0x00,                    /* inProtoMask = UBX+NMEA+RTCM */
         0x03, 0x00,                    /* outProtoMask = UBX+NMEA     */
         0x00, 0x00,                    /* flags                       */
@@ -120,6 +121,7 @@ static void gps_neo6m_configure(void)
     vTaskDelay(pdMS_TO_TICKS(50));
     ESP_LOGI(TAG, "NEO-6M: rate set to %d Hz (measRate=200ms)", CFG_GPS_RATE_HZ);
 }
+#endif
 
 /* Cấu hình NEO-8M cho chế độ 10 Hz, chỉ xuất RMC:
  *   1. Đổi baud module → 115200 (UBX-CFG-PRT)
@@ -127,6 +129,7 @@ static void gps_neo6m_configure(void)
  *   3. Đặt chu kỳ đo 100 ms = 10 Hz (UBX-CFG-RATE)
  * NEO-8M hỗ trợ đa chòm sao (GPS+GLONASS+Galileo) → $GNRMC.
  * Gọi khi ESP32 UART vẫn ở 9600 baud (CFG_GPS_UART_BAUD_BOOT). */
+#if GPS_MODEL == GPS_MODEL_NEO8M
 static void gps_neo8m_configure(void)
 {
     /* ── Bước 1: Đổi baud NEO-8M → 115200 (UBX-CFG-PRT, UART1, 20 byte) ─
@@ -168,6 +171,7 @@ static void gps_neo8m_configure(void)
     vTaskDelay(pdMS_TO_TICKS(50));
     ESP_LOGI(TAG, "NEO-8M: rate set to %d Hz (measRate=100ms)", CFG_GPS_RATE_HZ);
 }
+#endif
 
 /* Chuyển chuỗi NMEA dạng DDDMM.MMMM + chỉ hướng → decimal degrees */
 static float parse_coord(const char *field, char dir)
@@ -194,12 +198,19 @@ static bool checksum_ok(const char *sent)
     return calc == got;
 }
 
-/* Tách câu NMEA bằng dấu phẩy → mảng con trỏ fields[] */
+/* Tách câu NMEA bằng dấu phẩy → mảng con trỏ fields[] (giữ lại các trường trống) */
 static int tokenize(char *buf, char *fields[], int max)
 {
     int n = 0;
-    char *tok = strtok(buf, ",");
-    while (tok && n < max) { fields[n++] = tok; tok = strtok(NULL, ","); }
+    char *p = buf;
+    while (p && n < max) {
+        fields[n++] = p;
+        p = strchr(p, ',');
+        if (p) {
+            *p = '\0';
+            p++;
+        }
+    }
     return n;
 }
 
