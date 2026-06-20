@@ -11,7 +11,7 @@ void dr_init(dr_state_t *dr)
 }
 
 /* Cập nhật DR một bước:
- *   Body frame: +X = trước mũi xe, +Y = trái.
+ *   Body frame: +X = trước mũi xe, +Y = phải.
  *   World frame: +X = East, +Y = North.
  *   Rotation: Xw = ax*sin(h) + ay*cos(h),  Yw = ax*cos(h) - ay*sin(h)
  *

@@ -112,8 +112,8 @@ static int get_closest_front_peer(float *out_dist)
         /* Chiếu sang body frame:
          *   dy_body > 0 → peer ở phía trước mũi xe
          *   dx_body     → lệch ngang (dương = bên phải xe) */
-        float dx_body =  dx * cos_h + dy * sin_h;
-        float dy_body = -dx * sin_h + dy * cos_h;
+        float dx_body =  dx * cos_h - dy * sin_h;
+        float dy_body =  dx * sin_h + dy * cos_h;
 
         /* Xe phía trước: thẳng phía trước (dy_body > 0) và cùng làn (|dx_body| < 15m) */
         if (dy_body > 0.0f && fabsf(dx_body) < 15.0f && dist < min_dist) {

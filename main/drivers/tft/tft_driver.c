@@ -310,14 +310,14 @@ void tft_draw_char(uint16_t x, uint16_t y, char c,
     if (c < 32 || c > 127) c = '?';
     const uint8_t *g = s_font5x7[c - 32];
 
-    /* Buffer for entire char (max scale=3 → 15×21 = 315 px = 630 B) */
-    uint8_t cbuf[15 * 21 * 2];
+    /* Buffer for entire char including 1px gap (max scale=4 -> 24x28 = 672 px = 1344 B) */
+    uint8_t cbuf[24 * 28 * 2];
     int idx = 0;
 
     for (int row = 0; row < 7; row++) {
         for (int sr = 0; sr < scale; sr++) {
-            for (int col = 0; col < 5; col++) {
-                uint16_t color = (g[col] & (1 << row)) ? fg : bg;
+            for (int col = 0; col < 6; col++) {
+                uint16_t color = (col < 5 && (g[col] & (1 << row))) ? fg : bg;
                 uint8_t ch_byte = color >> 8, cl_byte = color & 0xFF;
                 for (int sc = 0; sc < scale; sc++) {
                     if (idx < (int)sizeof(cbuf) - 1) {
@@ -329,7 +329,7 @@ void tft_draw_char(uint16_t x, uint16_t y, char c,
         }
     }
 
-    set_window(x, y, x + 5 * scale - 1, y + 7 * scale - 1);
+    set_window(x, y, x + 6 * scale - 1, y + 7 * scale - 1);
     set_dc(1); set_cs(0);
     spi_tx(cbuf, idx);
     set_cs(1);
