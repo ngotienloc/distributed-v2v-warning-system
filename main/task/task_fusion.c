@@ -64,6 +64,9 @@ void task_fusion(void *arg)
         bool gps_updated = false;
         while (xQueueReceive(q_gps, &gps, 0) == pdTRUE) {
             if (!gps.valid) continue;
+            if (g_dr_test.outage_active) {
+                continue; /* Giả lập mất GPS: bỏ qua không cập nhật vào Complementary Filter */
+            }
             imu_filter_fuse_gps_heading(&cf, gps.course, gps.speed);
             s_last_valid_gps = gps;  /* lưu lại fix cuối */
             gps_updated = true;

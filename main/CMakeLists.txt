@@ -29,6 +29,7 @@ idf_component_register(
         "task/task_localization.c"
         "task/task_v2v.c"
         "task/task_buzzer.c"
+        "task/task_button.c"
 
         # V2V layer
         "v2v/espnow_comm.c"

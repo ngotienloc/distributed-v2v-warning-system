@@ -113,3 +113,18 @@ typedef struct {
     vehicle_state_t peers[COLLISION_MAX_PEERS];
     int             n_peers;
 } collision_input_t;
+
+typedef struct {
+    int mode;                      /* 0: Normal, 1: 5s, 2: 10s, 3: 20s, 4: 30s */
+    volatile bool outage_active;   /* true = đang giả lập mất GPS */
+    volatile bool waiting_first_fix; /* true = đang chờ GPS fix đầu tiên sau khi hết outage */
+    uint32_t outage_start_ms;      /* thời điểm bắt đầu mất GPS */
+    uint32_t outage_duration_ms;   /* thời gian mất GPS mong muốn (ms) */
+    float results[4][5];           /* 4 chế độ (5s, 10s, 20s, 30s) x 5 kết quả đo cuối */
+    int result_count[4];           /* số lượng kết quả đo hiện có của mỗi chế độ */
+    float last_drift;              /* sai số vị trí ở lần đo cuối cùng (m) */
+    bool last_drift_valid;         /* true = kết quả sai số cuối cùng hợp lệ */
+    volatile bool trigger_double_beep; /* true = yêu cầu kêu bíp kép khi đo xong */
+} dr_test_state_t;
+
+extern dr_test_state_t g_dr_test;

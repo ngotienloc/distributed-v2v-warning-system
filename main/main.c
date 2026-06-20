@@ -18,6 +18,10 @@
 #include "drivers/imu/mpu6050.h"
 #include "v2v/espnow_comm.h"
 #include "v2v/neighbor_table.h"
+#include "types.h"
+#include "task/task_button.h"
+
+dr_test_state_t g_dr_test = {0};
 
 static const char *TAG = "main";
 
@@ -122,7 +126,14 @@ void app_main(void)
                              CFG_STACK_BUZZER,
                              NULL, CFG_PRIO_BUZZER, NULL,
                              CFG_CORE_BUZZER);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
-    ESP_LOGI(TAG, "All 8 tasks created — FreeRTOS scheduler running.");
+    xTaskCreatePinnedToCore(task_button,
+                             "button",
+                             CFG_STACK_BUTTON,
+                             NULL, CFG_PRIO_BUTTON, NULL,
+                             CFG_CORE_BUTTON);
+
+    ESP_LOGI(TAG, "All 9 tasks created — FreeRTOS scheduler running.");
     /* app_main trả về; FreeRTOS scheduler tiếp quản. */
 }

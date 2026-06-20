@@ -55,6 +55,9 @@
 /* ── Buzzer Pin ──────────────────────────────────────────────────────── */
 #define CFG_BUZZER_PIN          19
 
+/* ── BOOT Button Pin ─────────────────────────────────────────────────── */
+#define CFG_BOOT_PIN            0
+
 /* ── Stack size mỗi task (bytes) ─────────────────────────────────────── */
 #define CFG_STACK_IMU           3072
 #define CFG_STACK_GPS           3072
@@ -64,6 +67,7 @@
 #define CFG_STACK_COLLISION     4096
 #define CFG_STACK_DISPLAY_TFT   5120
 #define CFG_STACK_BUZZER        4096
+#define CFG_STACK_BUTTON        2048
 
 /* ── Độ ưu tiên task (cao hơn = ưu tiên hơn) ────────────────────────── */
 #define CFG_PRIO_IMU            6   /* cao nhất — đọc cảm biến real-time */
@@ -74,6 +78,7 @@
 #define CFG_PRIO_COLLISION      3
 #define CFG_PRIO_BUZZER         3
 #define CFG_PRIO_DISPLAY_TFT    2   /* thấp nhất — UI không quan trọng bằng safety */
+#define CFG_PRIO_BUTTON         2
 
 /* ── CPU core cho mỗi task ──────────────────────────────────────────── */
 #define CFG_CORE_IMU            0
@@ -84,6 +89,7 @@
 #define CFG_CORE_COLLISION      1   /* tách sang core 1 để không tranh với pipeline cảm biến */
 #define CFG_CORE_DISPLAY_TFT    1
 #define CFG_CORE_BUZZER         1
+#define CFG_CORE_BUTTON         1
 
 /* ── Chu kỳ task (ms) ────────────────────────────────────────────────── */
 #define CFG_PERIOD_IMU_MS       10   /* 100 Hz */

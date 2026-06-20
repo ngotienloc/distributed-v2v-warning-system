@@ -83,8 +83,43 @@ void task_localization(void *arg)
 
         /* ── 1. GPS hợp lệ: reset DR + tái tích phân IMU buffer ──────── */
         bool gps_reset_this_tick = false;
-        if (fused.gps_updated && fused.gps.valid) {
+        if (fused.gps_updated && fused.gps.valid && !g_dr_test.outage_active) {
             uint32_t gps_ts = fused.gps.timestamp_ms;
+
+            /* Nếu đang chờ fix đầu tiên sau khi kết thúc outage để đo sai số */
+            if (g_dr_test.waiting_first_fix) {
+                float gps_x = 0.0f, gps_y = 0.0f;
+                if (s_ref_valid) {
+                    geo_latlon_to_enu(s_ref_lat, s_ref_lon,
+                                      fused.gps.latitude, fused.gps.longitude,
+                                      &gps_x, &gps_y);
+                }
+                /* Sai số là khoảng cách giữa ước tính DR hiện tại và GPS thực tế mới */
+                float dx = dr.x - gps_x;
+                float dy = dr.y - gps_y;
+                float error = sqrtf(dx * dx + dy * dy);
+
+                int m_idx = g_dr_test.mode - 1; /* 1: 5s, 2: 10s, 3: 20s, 4: 30s */
+                if (m_idx >= 0 && m_idx < 4) {
+                    int r_idx = g_dr_test.result_count[m_idx];
+                    if (r_idx < 5) {
+                        g_dr_test.results[m_idx][r_idx] = error;
+                        g_dr_test.result_count[m_idx]++;
+                    } else {
+                        /* Đẩy FIFO kết quả */
+                        for (int i = 0; i < 4; i++) {
+                            g_dr_test.results[m_idx][i] = g_dr_test.results[m_idx][i+1];
+                        }
+                        g_dr_test.results[m_idx][4] = error;
+                    }
+                }
+                g_dr_test.last_drift = error;
+                g_dr_test.last_drift_valid = true;
+                g_dr_test.waiting_first_fix = false;
+                g_dr_test.trigger_double_beep = true; /* Yêu cầu kêu bíp kép bên task_button */
+
+                ESP_LOGI(TAG, "DR TEST: Mode %d, Error = %.2f m", g_dr_test.mode, error);
+            }
 
             /* Reset DR về (0,0) tại đúng thời điểm GPS fix — không ngoại suy.
              * fix_age = 0.0f vì ta sẽ bù bằng re-integration thực tế bên dưới. */
@@ -126,7 +161,9 @@ void task_localization(void *arg)
         }
 
         /* ── 2. Kiểm tra GPS stale: đánh dấu mất GPS sau CFG_GPS_STALE_MS ── */
-        if (ego.gps_valid) {
+        if (g_dr_test.outage_active) {
+            ego.gps_valid = false;
+        } else if (ego.gps_valid) {
             uint32_t gps_age_ms = now_ms() - ego.local_ts_ms;
             if (gps_age_ms > CFG_GPS_STALE_MS) {
                 ego.gps_valid = false;
