@@ -1,7 +1,8 @@
 /* main.c — Điểm khởi động hệ thống V2V
  *
  * Luồng khởi tạo:
- *   NVS → Event Loop → Queues/EventGroup → Hardware (IMU, GPS) → ESP-NOW → Tasks
+ *   NVS → Event Loop → Queues/EventGroup → Hardware (IMU) → ESP-NOW → Tasks
+ *   GPS được khởi tạo bởi task_gps (register callback trước, rồi gps_init).
  *
  * Pipeline FreeRTOS (IMU → Fusion → Localization → V2V → Collision → TFT):
  *   task_imu  →(q_imu)→  task_fusion  →(q_fusion_out)→  task_localization
@@ -14,7 +15,6 @@
 #include "esp_log.h"
 #include "config.h"
 #include "task/app_queues.h"
-#include "drivers/gps/gps.h"
 #include "drivers/imu/mpu6050.h"
 #include "v2v/espnow_comm.h"
 #include "v2v/neighbor_table.h"
@@ -30,8 +30,6 @@ void task_v2v         (void *arg);
 void task_collision   (void *arg);
 void task_display_tft (void *arg);
 void task_buzzer      (void *arg);
-/* Đăng ký GPS callback — phải gọi trước gps_init() */
-void gps_task_register_cb(void);
 
 void app_main(void)
 {
@@ -59,8 +57,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing hardware drivers...");
     ESP_ERROR_CHECK(mpu_init());
     ESP_ERROR_CHECK(mpu_calibrate());  /* ~3 s, yêu cầu xe đứng yên */
-    gps_task_register_cb();            /* Đăng ký callback TRƯỚC gps_init() */
-    ESP_ERROR_CHECK(gps_init());
+    /* GPS được khởi tạo bởi task_gps: register callback → gps_init() */
 
     /* ── 5. Khởi tạo lớp V2V (ESP-NOW broadcast) ──────────────────────── */
     ESP_ERROR_CHECK(espnow_init(q_v2v_rx));

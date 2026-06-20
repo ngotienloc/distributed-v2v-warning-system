@@ -1,15 +1,12 @@
 /* task/task_gps.c — Cầu nối giữa GPS driver và pipeline.
  *
- * GPS driver gọi callback on_fix() khi có NMEA RMC hợp lệ.
+ * Task này "own" toàn bộ vòng đời GPS:
+ *   1. Đăng ký callback on_fix() TRƯỚC
+ *   2. Gọi gps_init() → driver tạo uart_reader_task và parse_task
+ *   3. Loop ngủ — on_fix() chạy trong parse_task của driver khi có RMC fix.
  *
- * QUAN TRỌNG — thứ tự khởi tạo đúng trong main.c:
- *   1. gps_task_register_cb()   ← đăng ký callback TRƯỚC
- *   2. gps_init()               ← driver bắt đầu parse NMEA
- *   3. xTaskCreate(task_gps)    ← task chỉ giữ ngữ cảnh, không đăng ký lại
- *
- * Lý do: gps_init() tạo uart_reader_task và parse_task ngay lập tức.
- * Nếu callback đăng ký sau gps_init() (như trước đây), các GPS fix đến
- * trong khoảng thời gian calibrate IMU (~3 giây) sẽ bị driver bỏ qua. */
+ * Thứ tự register → init đảm bảo callback luôn sẵn sàng trước khi driver
+ * bắt đầu nhận dữ liệu NMEA, tránh bỏ lỡ GPS fix đầu tiên. */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_queues.h"
@@ -43,22 +40,17 @@ static void on_fix(const gps_fix_t *fix, void *ctx)
     }
 }
 
-/* ── Đăng ký callback — phải gọi trong main.c TRƯỚC gps_init() ─────────
- * Tách ra khỏi task_gps() để tránh race condition: nếu callback được
- * đăng ký sau gps_init(), các GPS fix đến trong khoảng thời gian calibrate
- * IMU (~3 giây) sẽ bị driver bỏ qua vì s_cb == NULL. */
-void gps_task_register_cb(void)
-{
-    gps_register_cb(on_fix, NULL);
-    ESP_LOGI(TAG, "GPS on_fix callback registered -> q_gps");
-}
-
-/* ── Task entry — task tồn tại để giữ ngữ cảnh; callback đã đăng ký ── */
+/* ── Task entry ─────────────────────────────────────────────────────── */
 void task_gps(void *arg)
 {
-    ESP_LOGI(TAG, "GPS task alive (callback registered before gps_init)");
+    /* Bước 1: đăng ký callback TRƯỚC khi driver tạo parse task */
+    gps_register_cb(on_fix, NULL);
+    ESP_LOGI(TAG, "GPS callback registered -> q_gps");
 
-    /* Task tồn tại để giữ callback đăng ký; ngủ vĩnh viễn */
+    /* Bước 2: khởi tạo driver (tạo uart_reader_task + parse_task) */
+    ESP_ERROR_CHECK(gps_init());
+
+    /* Bước 3: loop — on_fix() tự được gọi bởi parse_task của driver */
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
