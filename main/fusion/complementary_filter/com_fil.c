@@ -5,6 +5,7 @@
 #include <string.h>
 #include <math.h>
 
+#if !CFG_BYPASS_GRAVITY_COMP
 /* Loại bỏ thành phần trọng lực khỏi accel đo được.
  * Công thức: ax_lin = ax_raw - (-g*sin(pitch)), ay_lin = ay_raw - (g*sin(roll)*cos(pitch)) */
 static void remove_gravity(const imu_filter_state_t *s, float ax_raw, float ay_raw,
@@ -14,6 +15,7 @@ static void remove_gravity(const imu_filter_state_t *s, float ax_raw, float ay_r
     *ax_lin = ax_raw - (-sinf(s->pitch) * g);
     *ay_lin = ay_raw - ( sinf(s->roll) * cosf(s->pitch) * g);
 }
+#endif
 
 void imu_filter_init(imu_filter_state_t *s)
 {
@@ -56,8 +58,18 @@ void imu_filter_update(imu_filter_state_t *s, const imu_data_t *imu, float dt)
     s->roll  = alpha * (s->roll  + imu->gyro_x * dt) + (1.0f - alpha) * accel_roll;
 
     /* Heading: tích phân gyro_z (quay CW = dương) */
+#if CFG_VIRTUAL_GPS_ENABLE
+    s->heading = CFG_VIRTUAL_GPS_HDG;
+#else
     s->heading = normalize_angle(s->heading - imu->gyro_z * dt);
+#endif
 
+#if CFG_BYPASS_GRAVITY_COMP
+    /* Bỏ qua bù trọng lực: gán trực tiếp gia tốc tuyến tính bằng gia tốc thô
+     * (đảo dấu trục X để việc nghiêng board tạo gia tốc tăng/giảm tự nhiên) */
+    s->accel_x_lin = -imu->accel_x;
+    s->accel_y_lin = 0.0f;
+#else
     /* Loại trọng lực sau warmup (cần pitch/roll ổn định trước) */
     if (s->tick >= CFG_CF_WARMUP_TICKS) {
         remove_gravity(s, imu->accel_x, imu->accel_y,
@@ -67,6 +79,7 @@ void imu_filter_update(imu_filter_state_t *s, const imu_data_t *imu, float dt)
         s->accel_x_lin = imu->accel_x;
         s->accel_y_lin = imu->accel_y;
     }
+#endif
 }
 
 /* Fuse heading từ GPS: correction = alpha * angle_diff(gps, imu)
@@ -75,9 +88,13 @@ void imu_filter_fuse_gps_heading(imu_filter_state_t *s,
                                   float               gps_heading,
                                   float               gps_speed)
 {
+#if CFG_VIRTUAL_GPS_ENABLE
+    s->heading = CFG_VIRTUAL_GPS_HDG;
+#else
     if (gps_speed < CFG_HDG_MIN_SPEED_MS) return;
     float error = angle_diff(gps_heading, s->heading);
     s->heading  = normalize_angle(s->heading + CFG_HDG_GPS_ALPHA * error);
+#endif
 }
 
 /* Kiểm tra trạng thái phanh gấp: đếm số mẫu liên tiếp accel_x_lin < ngưỡng.

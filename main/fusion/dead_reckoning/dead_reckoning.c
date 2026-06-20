@@ -29,11 +29,20 @@ void dr_update(dr_state_t *dr, float ax_lin, float ay_lin, float heading, float 
     dr->vx += ax_w * dt;
     dr->vy += ay_w * dt;
 
-    /* ZVU: kẹp vận tốc về 0 nếu quá nhỏ */
+    /* Ngăn lùi xe khi phanh gấp: nếu tích vô hướng vận tốc với hướng đầu xe âm -> xe đang lùi, kẹp về 0 */
+    float v_fwd = dr->vx * sh + dr->vy * ch;
+    if (v_fwd < 0.0f) {
+        dr->vx = 0.0f;
+        dr->vy = 0.0f;
+    }
+
+    /* ZVU: kẹp vận tốc về 0 nếu quá nhỏ (bỏ qua ở chế độ GPS ảo để cho phép xe tăng tốc từ 0) */
+#if !CFG_VIRTUAL_GPS_ENABLE
     if (SQ(dr->vx) + SQ(dr->vy) < SQ(CFG_ZVU_SPEED_MS)) {
         dr->vx = 0.0f;
         dr->vy = 0.0f;
     }
+#endif
 
     /* Tích phân vị trí (công thức chuyển động đều có gia tốc) */
     dr->x += dr->vx * dt + 0.5f * ax_w * dt * dt;

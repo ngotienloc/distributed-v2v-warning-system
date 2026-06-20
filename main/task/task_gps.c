@@ -14,11 +14,13 @@
 #include "config.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "types.h"
 #include <string.h>
 
 static const char *TAG = "task_gps";
 
+#if !CFG_VIRTUAL_GPS_ENABLE
 /* ── Callback từ GPS driver — chạy trong parse_task của driver ──────── */
 static void on_fix(const gps_fix_t *fix, void *ctx)
 {
@@ -39,10 +41,56 @@ static void on_fix(const gps_fix_t *fix, void *ctx)
         ESP_LOGW(TAG, "q_gps full — GPS fix dropped");
     }
 }
+#endif
 
 /* ── Task entry ─────────────────────────────────────────────────────── */
 void task_gps(void *arg)
 {
+#if CFG_VIRTUAL_GPS_ENABLE
+    ESP_LOGI(TAG, "Virtual GPS mode active for indoor testing.");
+
+    /* Lấy địa chỉ MAC của thiết bị để tự động phân vai trò */
+    uint8_t mac[6] = {0};
+    esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
+
+    /* Sử dụng XOR tất cả các byte MAC để có tính phân tán cao hơn (tránh trường hợp cả 2 board đều có byte cuối chẵn) */
+    uint8_t mac_xor = mac[0] ^ mac[1] ^ mac[2] ^ mac[3] ^ mac[4] ^ mac[5];
+
+    float lat, lon;
+    if (mac_xor % 2 == 0) {
+        lat = CFG_VIRTUAL_GPS_LAT_A;
+        lon = CFG_VIRTUAL_GPS_LON_A;
+        ESP_LOGI(TAG, "Device registered as Board A (Front). Lat=%.6f, Lon=%.6f, MAC XOR=%02X", lat, lon, mac_xor);
+    } else {
+        lat = CFG_VIRTUAL_GPS_LAT_B;
+        lon = CFG_VIRTUAL_GPS_LON_B;
+        ESP_LOGI(TAG, "Device registered as Board B (Rear). Lat=%.6f, Lon=%.6f, MAC XOR=%02X", lat, lon, mac_xor);
+    }
+
+    /* Tạo một gói tin fix ban đầu để khởi tạo gốc tọa độ cho DR */
+    gps_data_t msg = {
+        .latitude     = lat,
+        .longitude    = lon,
+        .speed        = 0.0f,
+        .course       = CFG_VIRTUAL_GPS_HDG,
+        .valid        = true,
+        .timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000ULL),
+    };
+
+    /* Chờ các task khác khởi động ổn định trước khi gửi */
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    if (xQueueSend(q_gps, &msg, 0) == pdTRUE) {
+        ESP_LOGI(TAG, "Virtual GPS initial fix injected successfully!");
+    } else {
+        ESP_LOGE(TAG, "Failed to inject virtual GPS initial fix!");
+    }
+
+    /* Loop ngủ mãi mãi vì không cần đọc GPS thực tế */
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(10000));
+    }
+#else
     /* Bước 1: đăng ký callback TRƯỚC khi driver tạo parse task */
     gps_register_cb(on_fix, NULL);
     ESP_LOGI(TAG, "GPS callback registered -> q_gps");
@@ -54,4 +102,5 @@ void task_gps(void *arg)
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
+#endif
 }

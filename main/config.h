@@ -107,7 +107,14 @@
 #define CFG_PKT_STALE_MS        1000  /* thời gian tối đa packet được coi là hợp lệ (ms) */
 #define CFG_PKT_MAGIC           0xB6  /* byte nhận dạng gói tin V2V */
 
-
+/* ── Cấu hình GPS ảo cho test trong nhà (Indoor Testing) ────────────── */
+#define CFG_VIRTUAL_GPS_ENABLE     1      /* 1 = Bật GPS ảo, 0 = Dùng GPS thật */
+#define CFG_VIRTUAL_GPS_LAT_A      21.028500f
+#define CFG_VIRTUAL_GPS_LON_A      105.854200f
+#define CFG_VIRTUAL_GPS_LAT_B      21.028300f  /* Phía Nam xe A khoảng ~22m */
+#define CFG_VIRTUAL_GPS_LON_B      105.854200f
+#define CFG_VIRTUAL_GPS_HDG        0.0f        /* Hướng xe ban đầu (0 = North) */
+#define CFG_BYPASS_GRAVITY_COMP    CFG_VIRTUAL_GPS_ENABLE  /* 1 = Bỏ qua bù trọng lực để test bằng nghiêng board */
 
 /* ── Hệ số chuyển đổi cảm biến ──────────────────────────────────────── */
 #define CFG_ACCEL_SCALE         (1.0f / 4096.0f * 9.81f)   /* ±8g → m/s² */

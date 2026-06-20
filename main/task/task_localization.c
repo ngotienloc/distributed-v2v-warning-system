@@ -126,7 +126,7 @@ void task_localization(void *arg)
         }
 
         /* ── 2. Kiểm tra GPS stale: đánh dấu mất GPS sau CFG_GPS_STALE_MS ── */
-        if (ego.gps_valid) {
+        if (ego.gps_valid && !CFG_VIRTUAL_GPS_ENABLE) {
             uint32_t gps_age_ms = now_ms() - ego.local_ts_ms;
             if (gps_age_ms > CFG_GPS_STALE_MS) {
                 ego.gps_valid = false;
@@ -157,15 +157,18 @@ void task_localization(void *arg)
         s_imu_head = (s_imu_head + 1) % IMU_BUF_SIZE;
         if (s_imu_count < IMU_BUF_SIZE) s_imu_count++;
 
-        /* ── 4. Chọn nguồn tốc độ ────────────────────────────────────
-         * GPS hợp lệ  → tốc độ GPS (chính xác).
-         * GPS mất     → tốc độ DR + decay để giảm drift. */
+#if CFG_VIRTUAL_GPS_ENABLE
+        /* Trong chế độ test trong nhà, dùng vận tốc tích phân từ DR và không tự động giảm tốc khi đặt phẳng */
+        ego.velocity = sqrtf(dr.vx * dr.vx + dr.vy * dr.vy);
+        ego.gps_valid = true; /* Cưỡng bức GPS luôn valid cho UI/V2V */
+#else
         if (ego.gps_valid) {
             ego.velocity = fused.gps_updated ? fused.gps.speed : ego.velocity;
         } else {
             dr_apply_velocity_decay(&dr, DR_DECAY_PER_S, dt);
             ego.velocity = sqrtf(dr.vx * dr.vx + dr.vy * dr.vy);
         }
+#endif
 
         ego.x            = dr.x;
         ego.y            = dr.y;
