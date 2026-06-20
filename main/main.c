@@ -30,6 +30,8 @@ void task_v2v         (void *arg);
 void task_collision   (void *arg);
 void task_display_tft (void *arg);
 void task_buzzer      (void *arg);
+/* Đăng ký GPS callback — phải gọi trước gps_init() */
+void gps_task_register_cb(void);
 
 void app_main(void)
 {
@@ -57,6 +59,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing hardware drivers...");
     ESP_ERROR_CHECK(mpu_init());
     ESP_ERROR_CHECK(mpu_calibrate());  /* ~3 s, yêu cầu xe đứng yên */
+    gps_task_register_cb();            /* Đăng ký callback TRƯỚC gps_init() */
     ESP_ERROR_CHECK(gps_init());
 
     /* ── 5. Khởi tạo lớp V2V (ESP-NOW broadcast) ──────────────────────── */

@@ -516,31 +516,19 @@ void task_display_tft(void *arg)
 {
     TickType_t last_wake = xTaskGetTickCount();
 
-#ifndef V2V_HW_STUB
     if (tft_init() != ESP_OK) {
         ESP_LOGE(TAG, "TFT init failed — task exits");
         vTaskDelete(NULL);
         return;
     }
     render_boot();
-#endif
 
     ESP_LOGI(TAG, "started — q_tft_collision+q_alert_tft -> TFT (10 Hz)");
 
     while (1) {
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(CFG_PERIOD_TFT_MS));
 
-#ifndef V2V_HW_STUB
         refresh_state();
         render_frame();
-#else
-        /* Stub mode: log ra console thay vì vẽ màn hình */
-        refresh_state();
-        ESP_LOGD(TAG, "[TFT] ego v=%.1f hdg=%.0f | peers=%d | alert=%d",
-                 s_ci.ego.velocity,
-                 s_ci.ego.heading * 57.3f,
-                 s_ci.n_peers,
-                 s_alert.level);
-#endif
     }
 }

@@ -80,9 +80,11 @@ void imu_filter_fuse_gps_heading(imu_filter_state_t *s,
     s->heading  = normalize_angle(s->heading + CFG_HDG_GPS_ALPHA * error);
 }
 
-/* Phát hiện phanh gấp: đếm số mẫu liên tiếp accel_x_lin < ngưỡng.
- * Cần ≥ CFG_EBBL_BRAKE_COUNT mẫu liên tiếp để tránh spike nhiễu. */
-bool imu_filter_detect_brake(imu_filter_state_t *s)
+/* Kiểm tra trạng thái phanh gấp: đếm số mẫu liên tiếp accel_x_lin < ngưỡng.
+ * Cần ≥ CFG_EBBL_BRAKE_COUNT mẫu liên tiếp để tránh spike nhiễu.
+ * Level-triggered: trả true trong suốt khoảng thời gian phanh gấp,
+ * không chỉ một lần — cooldown ở task_fusion chống spam EBBL event. */
+bool imu_filter_is_braking(imu_filter_state_t *s)
 {
     if (s->accel_x_lin < CFG_EBBL_BRAKE_MS2) {
         if (s->brake_count < CFG_EBBL_BRAKE_COUNT)

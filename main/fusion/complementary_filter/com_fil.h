@@ -27,5 +27,8 @@ void imu_filter_update(imu_filter_state_t *s, const imu_data_t *imu, float dt);
 /* Fuse heading GPS vào trạng thái CF (chỉ khi tốc độ > CFG_HDG_MIN_SPEED_MS) */
 void imu_filter_fuse_gps_heading(imu_filter_state_t *s, float gps_heading, float gps_speed);
 
-/* Phát hiện phanh gấp: true khi accel_x_lin < ngưỡng liên tiếp CFG_EBBL_BRAKE_COUNT lần */
-bool imu_filter_detect_brake(imu_filter_state_t *s);
+/* Kiểm tra trạng thái phanh gấp (level-triggered, không phải edge):
+ * Trả về true khi brake_count ≥ CFG_EBBL_BRAKE_COUNT (accel_x_lin < ngưỡng
+ * liên tiếp đủ số mẫu). Hàm trả true trong suốt thời gian đang phanh gấp,
+ * không chỉ một lần — cooldown ở tầng task_fusion chống spam event. */
+bool imu_filter_is_braking(imu_filter_state_t *s);

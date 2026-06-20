@@ -52,7 +52,7 @@ void task_fusion(void *arg)
         /* ── 3. Phát hiện phanh gấp (sau warmup để ổn định CF) ─────── */
         if (cf.tick >= CFG_CF_WARMUP_TICKS) {
             uint32_t now = now_ms();
-            if (imu_filter_detect_brake(&cf) &&
+            if (imu_filter_is_braking(&cf) &&
                 (now - brake_cooldown) >= CFG_EBBL_COOLDOWN_MS) {
                 brake_cooldown = now;
                 xEventGroupSetBits(g_ebbl_evt, EBBL_BRAKE_BIT);

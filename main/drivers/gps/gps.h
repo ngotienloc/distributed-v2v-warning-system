@@ -23,7 +23,7 @@ typedef void (*gps_fix_cb_t)(const gps_fix_t *fix, void *ctx);
 void gps_register_cb(gps_fix_cb_t cb, void *ctx);
 
 /* Khởi tạo UART, cấu hình module theo GPS_MODEL trong config.h, tạo task đọc/parse.
- *   GPS_MODEL_NEO6M → 5 Hz, 38400 baud
+ *   GPS_MODEL_NEO6M → 5 Hz, 115200 baud
  *   GPS_MODEL_NEO8M → 10 Hz, 115200 baud */
 esp_err_t gps_init(void);
 

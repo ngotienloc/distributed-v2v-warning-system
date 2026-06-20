@@ -13,11 +13,5 @@ float normalize_angle(float rad);
 /* Hiệu hai góc: a - b chuẩn hóa về [-π, π] */
 float angle_diff(float a, float b);
 
-/* Tích vô hướng 2D */
+/* Tích vô hướng 2D — dùng trong collision/ebbl */
 float dot2d(float ax, float ay, float bx, float by);
-
-/* Khoảng cách Euclid 2D */
-float dist2d(float x1, float y1, float x2, float y2);
-
-/* Xoay vector 2D theo góc (sin_h, cos_h) */
-void vec2_rotate(float x, float y, float sin_h, float cos_h, float *out_x, float *out_y);

@@ -1,7 +1,7 @@
 /* drivers/gps/gps.c — GPS driver cho u-blox NEO-6M và NEO-8M.
  *
  * Model được chọn qua macro GPS_MODEL trong config.h:
- *   GPS_MODEL_NEO6M → gps_neo6m_configure(): 5 Hz, 38400 baud
+ *   GPS_MODEL_NEO6M → gps_neo6m_configure(): 5 Hz, 115200 baud
  *   GPS_MODEL_NEO8M → gps_neo8m_configure(): 10 Hz, 115200 baud
  *
  * Kiến trúc 2 task nội bộ:
@@ -77,7 +77,7 @@ static void ubx_disable_nmea(uint8_t nmea_cls, uint8_t nmea_id)
 }
 
 /* Cấu hình NEO-6M cho chế độ 5 Hz, chỉ xuất RMC:
- *   1. Đổi baud module → 38400 (UBX-CFG-PRT)
+ *   1. Đổi baud module → 115200 (UBX-CFG-PRT)
  *   2. Tắt GGA, GLL, GSA, GSV, VTG
  *   3. Đặt chu kỳ đo 200 ms = 5 Hz (UBX-CFG-RATE)
  * Gọi khi ESP32 UART vẫn ở 9600 baud (CFG_GPS_UART_BAUD_BOOT). */
@@ -358,7 +358,7 @@ esp_err_t gps_init(void)
     /* ── Bước B: Gửi lệnh UBX cấu hình theo model đã chọn ─────────────── */
     vTaskDelay(pdMS_TO_TICKS(200));   /* chờ module sẵn sàng */
 #if GPS_MODEL == GPS_MODEL_NEO6M
-    gps_neo6m_configure();            /* baud→38400, RMC only, 5Hz  */
+    gps_neo6m_configure();            /* baud→115200, RMC only, 5Hz */
 #elif GPS_MODEL == GPS_MODEL_NEO8M
     gps_neo8m_configure();            /* baud→115200, RMC only, 10Hz */
 #endif

@@ -1,19 +1,10 @@
 #pragma once
 #include "driver/i2c.h"
 
-/* ── Feature flags ───────────────────────────────────────────────────── */
-// #define V2V_HW_STUB      /* Bật để chạy không cần TFT/GPS/IMU thật */
-
-/* Chế độ test: 0 = production, 1 = test mode */
-#define ENABLE_TEST_MODE        0
-
-/* In dữ liệu ra UART để vẽ đồ thị (Serial Plotter) */
-#define ENABLE_UART_PLOT        1
-
 /* ── GPS Model Selection ─────────────────────────────────────────────────
  * Chỉ cần thay đổi GPS_MODEL để chuyển giữa NEO-6M và NEO-8M.
  * Driver sẽ tự động dùng đúng lệnh UBX và tham số tương ứng. */
-#define GPS_MODEL_NEO6M  1   /* u-blox NEO-6M: tối đa 5 Hz, UART 38400 */
+#define GPS_MODEL_NEO6M  1   /* u-blox NEO-6M: tối đa 5 Hz, UART 115200 */
 #define GPS_MODEL_NEO8M  2   /* u-blox NEO-8M: tối đa 10 Hz, UART 115200 */
 
 #define GPS_MODEL        GPS_MODEL_NEO6M   /* ← ĐỔI Ở ĐÂY để chuyển module */
