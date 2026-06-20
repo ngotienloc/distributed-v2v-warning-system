@@ -13,3 +13,16 @@
 void geo_latlon_to_enu(float lat0, float lon0,
                         float lat,  float lon,
                         float *x,   float *y);
+
+/* Chuyển ngược tọa độ ENU (m) sang tọa độ địa lý (lat/lon)
+ * dựa trên gốc tham chiếu (lat0, lon0) — nghịch đảo của geo_latlon_to_enu.
+ *
+ * @param lat0, lon0  Gốc tọa độ tham chiếu (decimal degrees)
+ * @param x           Offset East (m) — input
+ * @param y           Offset North (m) — input
+ * @param lat         Vĩ độ kết quả (decimal degrees) — output
+ * @param lon         Kinh độ kết quả (decimal degrees) — output
+ */
+void geo_enu_to_latlon(float lat0, float lon0,
+                        float x,    float y,
+                        float *lat, float *lon);

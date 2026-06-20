@@ -1,8 +1,9 @@
 /* task/task_collision.c — Đánh giá nguy cơ va chạm mỗi 100 ms.
  *
  * Nhận collision_input_t từ q_collision_in (do task_v2v gửi ~15 Hz).
- * Với mỗi peer có GPS hợp lệ:
- *   1. Chuyển tọa độ GPS → ENU (m) lấy ego làm gốc.
+ * Với mỗi peer (bất kể gps_valid — lat/lon đã được task_localization cập nhật
+ * bằng DR 100 Hz nên luôn có giá trị hợp lệ):
+ *   1. Chuyển tọa độ lat/lon → ENU (m) lấy ego làm gốc.
  *   2. Bù trễ mạng bằng dead reckoning đơn giản (dùng esp_timer).
  *   3. Gọi ebbl_eval() → alert_result_t.
  * Gửi cảnh báo nặng nhất → q_alert_tft. */
@@ -42,8 +43,11 @@ void task_collision(void *arg)
             continue;  /* timeout, không có dữ liệu */
         }
 
-        /* ── 2. Fast path: không GPS hoặc không có peer ──────────────── */
-        if (!ci.ego.gps_valid || ci.n_peers == 0) {
+        /* ── 2. Fast path: không có peer hoặc chưa có gốc tọa độ ──────── */
+        /* Không còn check gps_valid của ego: task_localization đã cập nhật
+         * ego.lat/lon từ DR 100 Hz ngay cả khi GPS stale.                   */
+        bool ego_has_pos = (ci.ego.lat != 0.0f || ci.ego.lon != 0.0f);
+        if (!ego_has_pos || ci.n_peers == 0) {
             alert_result_t none = {0};
             none.n_peers = ci.n_peers;
             xQueueSend(q_alert_tft, &none, 0);
@@ -63,9 +67,12 @@ void task_collision(void *arg)
 
         for (int i = 0; i < ci.n_peers; i++) {
             vehicle_state_t peer = ci.peers[i];
-            if (!peer.gps_valid) continue;
+            /* Không bỏ qua peer !gps_valid: peer cũng dùng DR 100 Hz nên
+             * lat/lon luôn hợp lệ miễn là peer đã từng có ít nhất 1 GPS fix.
+             * Chỉ bỏ qua nếu tọa độ peer vẫn là (0,0) — tức chưa từng có fix. */
+            if (peer.lat == 0.0f && peer.lon == 0.0f) continue;
 
-            /* 3a. Chuyển GPS peer → ENU offset (m) so với ego */
+            /* 3a. Chuyển lat/lon peer → ENU offset (m) so với ego */
             float px, py;
             geo_latlon_to_enu(self.lat, self.lon,
                                peer.lat, peer.lon,

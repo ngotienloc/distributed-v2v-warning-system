@@ -58,10 +58,14 @@ static void refresh_state(void)
     while (xQueueReceive(q_tft_collision, &tmp_ci, 0) == pdTRUE)
         s_ci = tmp_ci;
 
-    /* Chuyển đổi lat/lon của từng peer sang ENU (m) lấy ego làm gốc. */
-    if (s_ci.ego.gps_valid) {
+    /* Chuyển đổi lat/lon của từng peer sang ENU (m) lấy ego làm gốc.
+     * Không kiểm tra gps_valid: task_localization đã cập nhật lat/lon từ
+     * DR 100 Hz nên ego và peer luôn có vị trí hợp lệ sau GPS fix đầu tiên.
+     * Chỉ bỏ qua nếu lat/lon vẫn là (0,0) — tức chưa từng có GPS fix. */
+    bool ego_has_pos = (s_ci.ego.lat != 0.0f || s_ci.ego.lon != 0.0f);
+    if (ego_has_pos) {
         for (int i = 0; i < s_ci.n_peers && i < COLLISION_MAX_PEERS; i++) {
-            if (!s_ci.peers[i].gps_valid) continue;
+            if (s_ci.peers[i].lat == 0.0f && s_ci.peers[i].lon == 0.0f) continue;
             geo_latlon_to_enu(s_ci.ego.lat,       s_ci.ego.lon,
                               s_ci.peers[i].lat,  s_ci.peers[i].lon,
                               &s_ci.peers[i].x,   &s_ci.peers[i].y);

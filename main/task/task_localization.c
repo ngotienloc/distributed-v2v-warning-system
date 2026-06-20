@@ -1,14 +1,16 @@
 /* task/task_localization.c — Ước tính trạng thái xe (ego vehicle state).
  *
  * Nhận fusion_output_t từ task_fusion, quyết định nguồn vị trí/tốc độ:
- *   - GPS hợp lệ  → reset Dead Reckoning, dùng tốc độ GPS.
- *   - GPS mất     → tiếp tục tích phân DR, áp decay để tránh drift tích lũy.
+ *   - GPS hợp lệ  → reset Dead Reckoning, lưu gốc GPS tham chiếu.
+ *   - Mọi chu kỳ → cung cấp lat/lon động bằng ENU→LatLon từ DR (100 Hz)
+ *     — khắc phục hiện tượng giật vị trí ở phía xe nhận V2V.
  *
  * Phát vehicle_state_t → q_ego_state để task_v2v broadcast lên ESP-NOW. */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_queues.h"
 #include "fusion/dead_reckoning/dead_reckoning.h"
+#include "fusion/geo_utils/geo_utils.h"
 #include "config.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -38,6 +40,12 @@ typedef struct {
 static imu_snap_t s_imu_buf[IMU_BUF_SIZE];
 static int        s_imu_head  = 0;   /* index ghi tiếp theo (vòng tròn) */
 static int        s_imu_count = 0;   /* số phần tử hợp lệ hiện có (0..IMU_BUF_SIZE) */
+
+/* ── Gốc tọa độ GPS tham chiếu cho chuyển đổi ENU → LatLon ─────────────
+ * Được cập nhật mỗi khi nhận được GPS fix hợp lệ.                        */
+static float s_ref_lat   = 0.0f;
+static float s_ref_lon   = 0.0f;
+static bool  s_ref_valid = false;
 
 static uint32_t now_ms(void)
 {
@@ -107,6 +115,12 @@ void task_localization(void *arg)
             ego.local_ts_ms = gps_ts;
             gps_reset_this_tick = true;
 
+            /* Cập nhật gốc tham chiếu: mỗi lần có GPS fix mới,
+             * DR (x,y) vừa được reset về (0,0) tại vị trí này. */
+            s_ref_lat   = fused.gps.latitude;
+            s_ref_lon   = fused.gps.longitude;
+            s_ref_valid = true;
+
             ESP_LOGD(TAG, "GPS reset+reint: lat=%.6f lon=%.6f spd=%.1fkm/h ts=%lums",
                      ego.lat, ego.lon, fused.gps.speed * 3.6f, (unsigned long)gps_ts);
         }
@@ -160,12 +174,23 @@ void task_localization(void *arg)
         ego.gyro_z       = fused.gyro_z;
         ego.update_ts_ms = now_ms();
 
+        /* ── 5. Chuyển đổi ENU → LatLon tần số cao (100 Hz) ──────────────
+         * Dùng gốc GPS tham chiếu gần nhất để ánh xạ dr.x/dr.y sang lat/lon
+         * trơn tru — khắc phục hiện tượng giật vị trí ở phía xe nhận V2V. */
+        if (s_ref_valid) {
+            geo_enu_to_latlon(s_ref_lat, s_ref_lon,
+                              dr.x, dr.y,
+                              &ego.lat, &ego.lon);
+        }
+
         /* Xả queue cũ, gửi snapshot mới nhất */
         vehicle_state_t stale;
         while (xQueueReceive(q_ego_state, &stale, 0) == pdTRUE) {}
         xQueueSend(q_ego_state, &ego, 0);
 
-        ESP_LOGV(TAG, "EGO x=%.2f y=%.2f v=%.2f hdg=%.1f° gps=%d",
-                 ego.x, ego.y, ego.velocity, ego.heading * 57.3f, ego.gps_valid);
+        ESP_LOGV(TAG, "EGO x=%.2f y=%.2f lat=%.6f lon=%.6f v=%.2f hdg=%.1f° gps=%d ref=%d",
+                 ego.x, ego.y, ego.lat, ego.lon,
+                 ego.velocity, ego.heading * 57.3f,
+                 ego.gps_valid, s_ref_valid);
     }
 }
