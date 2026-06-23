@@ -55,8 +55,12 @@ void imu_filter_update(imu_filter_state_t *s, const imu_data_t *imu, float dt)
     s->pitch = alpha * (s->pitch + imu->gyro_y * dt) + (1.0f - alpha) * accel_pitch;
     s->roll  = alpha * (s->roll  + imu->gyro_x * dt) + (1.0f - alpha) * accel_roll;
 
-    /* Heading: tích phân gyro_z (quay CW = dương) */
-    s->heading = normalize_angle(s->heading - imu->gyro_z * dt);
+    /* Heading: freeze trong warmup để tránh tích lũy bias nhiệt chưa ổn định.
+     * Sau CFG_CF_WARMUP_TICKS (500ms) mới bắt đầu tích phân — GPS sẽ anchor
+     * heading về hướng thực ngay khi xe chạy > CFG_HDG_MIN_SPEED_MS. */
+    if (s->tick >= CFG_CF_WARMUP_TICKS) {
+        s->heading = normalize_angle(s->heading - imu->gyro_z * dt);
+    }
 
     /* Loại trọng lực sau warmup (cần pitch/roll ổn định trước) */
     if (s->tick >= CFG_CF_WARMUP_TICKS) {

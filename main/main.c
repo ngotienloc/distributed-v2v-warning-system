@@ -56,7 +56,7 @@ void app_main(void)
     /* ── 4. Khởi tạo phần cứng ────────────────────────────────────────── */
     ESP_LOGI(TAG, "Initializing hardware drivers...");
     ESP_ERROR_CHECK(mpu_init());
-    ESP_ERROR_CHECK(mpu_calibrate());  /* ~3 s, yêu cầu xe đứng yên */
+    ESP_ERROR_CHECK(mpu_calibrate());  /* warmup ~10 s + calib ~5 s — xe phải đứng yên */
     /* GPS được khởi tạo bởi task_gps: register callback → gps_init() */
 
     /* ── 5. Khởi tạo lớp V2V (ESP-NOW broadcast) ──────────────────────── */
