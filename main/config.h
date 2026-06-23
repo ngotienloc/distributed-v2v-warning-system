@@ -7,7 +7,7 @@
 #define GPS_MODEL_NEO6M  1   /* u-blox NEO-6M: tối đa 5 Hz, UART 115200 */
 #define GPS_MODEL_NEO8M  2   /* u-blox NEO-8M: tối đa 10 Hz, UART 115200 */
 
-#define GPS_MODEL        GPS_MODEL_NEO6M   /* ← ĐỔI Ở ĐÂY để chuyển module */
+#define GPS_MODEL        GPS_MODEL_NEO8M   /* ← ĐỔI Ở ĐÂY để chuyển module */
 
 /* ── GPS UART pins (dùng chung cho cả NEO-6M và NEO-8M) ─────────────── */
 #define CFG_GPS_UART_PORT       UART_NUM_1
