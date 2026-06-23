@@ -618,8 +618,10 @@ static void render_boot(void)
     tft_clear(TFT_BG_IDLE);
     tft_draw_str( 8, 30,  "V2V",     TFT_ACCENT, TFT_BG_IDLE, 3);
     tft_draw_str( 8, 60,  "WARNING", TFT_ACCENT, TFT_BG_IDLE, 2);
-    tft_draw_str( 8, 90,  "INIT...", TFT_GRAY,   TFT_BG_IDLE, 1);
-    vTaskDelay(pdMS_TO_TICKS(1500));
+    tft_draw_str( 8, 90,  "WARMING UP...", TFT_GRAY,   TFT_BG_IDLE, 1);
+    /* Warmup delay thực xảy ra trong mpu_calibrate() (IMU task).
+     * TFT chỉ hiển thị splash ngắn rồi tiếp tục render bình thường. */
+    vTaskDelay(pdMS_TO_TICKS(500));
 }
 
 /* ── Task entry ──────────────────────────────────────────────────────── */

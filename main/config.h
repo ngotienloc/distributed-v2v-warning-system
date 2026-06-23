@@ -38,7 +38,11 @@
 #define CFG_IMU_I2C_SCL         41
 #define CFG_IMU_I2C_FREQ_HZ     400000
 #define CFG_IMU_I2C_ADDR        0x68    /* địa chỉ I2C mặc định MPU6050 */
-#define CFG_IMU_CALIB_S         3       /* thời gian hiệu chỉnh (giây), xe phải đứng yên */
+#define CFG_IMU_WARMUP_S        10      /* chờ chip đủ ấm TRƯỚC khi lấy mẫu calib (giây);
+                                         * MPU6050 ZRO thay đổi nhiều nhất trong 30s đầu cold→warm.
+                                         * 10s = điểm cân bằng tốt giữa chất lượng và UX. */
+#define CFG_IMU_CALIB_S         5       /* thời gian lấy mẫu calib (giây), xe phải đứng yên;
+                                         * tăng 3→5s: 500 mẫu thay vì 300 để trung bình tốt hơn. */
 
 /* ── TFT ST7735 (SPI) ────────────────────────────────────────────────── */
 #define CFG_TFT_SPI_HOST        SPI2_HOST

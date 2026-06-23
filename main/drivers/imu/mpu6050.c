@@ -74,9 +74,9 @@ esp_err_t mpu_init(void)
         return ESP_FAIL;
     }
 
-    /* Thoát sleep mode */
+    /* Thoát sleep mode — chờ 200ms để oscillator nội bộ ổn định (tăng từ 100ms) */
     ESP_ERROR_CHECK(i2c_bus_write_reg(s_dev, REG_PWR_MGMT_1, 0x00));
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     /* Sample rate = 1000 / (1 + 9) = 100 Hz */
     ESP_ERROR_CHECK(i2c_bus_write_reg(s_dev, REG_SMPLRT_DIV, 9));
@@ -94,8 +94,32 @@ esp_err_t mpu_init(void)
     nvs_handle_t nvs;
     if (nvs_open("mpu_calib", NVS_READONLY, &nvs) == ESP_OK) {
         size_t sz = sizeof(mpu_calib_t);
-        if (nvs_get_blob(nvs, "cal", &s_cal, &sz) == ESP_OK)
+        if (nvs_get_blob(nvs, "cal", &s_cal, &sz) == ESP_OK) {
             ESP_LOGI(TAG, "Calibration loaded from NVS");
+            /* Runtime re-bias: bù lệch nhiệt giữa lần calib (NVS) và lần boot hiện tại.
+             * Chip vừa ổn định oscillator (200ms), lấy 50 mẫu gz thực tế để
+             * cập nhật s_cal.gz mà KHÔNG ghi đè NVS — chỉ hiệu lực trong session này. */
+            int32_t gz_sum = 0;
+            bool rebias_ok = true;
+            for (int i = 0; i < 50; i++) {
+                uint8_t rbuf[14];
+                if (i2c_bus_read_burst(s_dev, REG_ACCEL_XOUT_H, rbuf, 14) != ESP_OK) {
+                    rebias_ok = false; break;
+                }
+                gz_sum += to16(rbuf[12], rbuf[13]);
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+            if (rebias_ok) {
+                int16_t gz_now = (int16_t)(gz_sum / 50);
+                /* Blend 50%: không override hoàn toàn NVS, tránh spike nếu chip còn rung */
+                int16_t gz_old = s_cal.gz;
+                s_cal.gz = (int16_t)((gz_old + gz_now) / 2);
+                ESP_LOGI(TAG, "Runtime gz re-bias: NVS=%d measured=%d -> active=%d",
+                         gz_old, gz_now, s_cal.gz);
+            } else {
+                ESP_LOGW(TAG, "Runtime re-bias skipped (I2C error)");
+            }
+        }
         nvs_close(nvs);
     } else {
         ESP_LOGW(TAG, "No NVS calibration found - using zero offsets");
@@ -110,7 +134,13 @@ esp_err_t mpu_init(void)
 esp_err_t mpu_calibrate(void)
 {
     const int n = CFG_IMU_CALIB_S * 100;  /* 100 Hz × giây */
-    ESP_LOGI(TAG, "Calibrating %d s - keep vehicle stationary...", CFG_IMU_CALIB_S);
+
+    /* Chờ chip đủ ấm TRƯỚC khi lấy mẫu — ZRO gyro ổn định sau ~CFG_IMU_WARMUP_S giây.
+     * KHÔNG di chuyển xe trong giai đoạn này. */
+    ESP_LOGI(TAG, "IMU thermal warmup %d s - do NOT move vehicle...", CFG_IMU_WARMUP_S);
+    vTaskDelay(pdMS_TO_TICKS((uint32_t)CFG_IMU_WARMUP_S * 1000));
+
+    ESP_LOGI(TAG, "Calibrating %d s (%d samples) - keep vehicle stationary...", CFG_IMU_CALIB_S, n);
 
     int32_t sax = 0, say = 0, saz = 0;
     int32_t sgx = 0, sgy = 0, sgz = 0;
