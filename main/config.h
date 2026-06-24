@@ -59,6 +59,9 @@
 /* ── Buzzer Pin ──────────────────────────────────────────────────────── */
 #define CFG_BUZZER_PIN          19
 
+/* ── Latency Test Pin (GPIO đo độ trễ đầu cuối bằng Oscilloscope) ────── */
+#define CFG_LATENCY_TEST_PIN    4
+
 /* ── Stack size mỗi task (bytes) ─────────────────────────────────────── */
 #define CFG_STACK_IMU           3072
 #define CFG_STACK_GPS           3072

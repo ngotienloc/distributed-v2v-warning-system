@@ -12,6 +12,7 @@
 #include "config.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "driver/gpio.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -52,11 +53,15 @@ void task_fusion(void *arg)
         /* ── 3. Phát hiện phanh gấp (sau warmup để ổn định CF) ─────── */
         if (cf.tick >= CFG_CF_WARMUP_TICKS) {
             uint32_t now = now_ms();
-            if (imu_filter_is_braking(&cf) &&
-                (now - brake_cooldown) >= CFG_EBBL_COOLDOWN_MS) {
-                brake_cooldown = now;
-                xEventGroupSetBits(g_ebbl_evt, EBBL_BRAKE_BIT);
-                ESP_LOGW(TAG, "Hard brake accel_x_lin=%.2f m/s² — EBBL burst triggered", cf.accel_x_lin);
+            if (imu_filter_is_braking(&cf)) {
+                if ((now - brake_cooldown) >= CFG_EBBL_COOLDOWN_MS) {
+                    brake_cooldown = now;
+                    xEventGroupSetBits(g_ebbl_evt, EBBL_BRAKE_BIT);
+                    ESP_LOGW(TAG, "Hard brake accel_x_lin=%.2f m/s² — EBBL burst triggered", cf.accel_x_lin);
+                }
+                gpio_set_level(CFG_LATENCY_TEST_PIN, 1);
+            } else {
+                gpio_set_level(CFG_LATENCY_TEST_PIN, 0);
             }
         }
 

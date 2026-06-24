@@ -5,6 +5,7 @@
 #include "config.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "driver/gpio.h"
 
 static const char *TAG = "task_buzzer";
 
@@ -39,6 +40,11 @@ void task_buzzer(void *arg)
             if (tmp_al.level > ALERT_LEVEL_NONE) {
                 s_alert_active = true;
                 s_alert_until = now_ms() + 1500; // Keep alert active for 1.5 seconds minimum
+                
+                // Nhận được cảnh báo phanh khẩn cấp từ xe lân cận -> kéo chân test lên HIGH
+                if (tmp_al.level == ALERT_LEVEL_CRITICAL) {
+                    gpio_set_level(CFG_LATENCY_TEST_PIN, 1);
+                }
             }
         }
 
@@ -49,6 +55,7 @@ void task_buzzer(void *arg)
             s_alert_active = false;
             s_alert.level = ALERT_LEVEL_NONE;
             s_alert.type = ALERT_TYPE_NONE;
+            gpio_set_level(CFG_LATENCY_TEST_PIN, 0); // Trở về mức LOW khi kết thúc cảnh báo
         }
 
         // If level changes, reset toggling immediately

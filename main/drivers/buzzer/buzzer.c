@@ -13,6 +13,12 @@ esp_err_t buzzer_init(void)
     gpio_set_direction(CFG_BUZZER_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(CFG_BUZZER_PIN, 0);
     ESP_LOGI(TAG, "Buzzer initialized on GPIO %d", CFG_BUZZER_PIN);
+
+    gpio_reset_pin(CFG_LATENCY_TEST_PIN);
+    gpio_set_direction(CFG_LATENCY_TEST_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(CFG_LATENCY_TEST_PIN, 0);
+    ESP_LOGI(TAG, "Latency test pin initialized on GPIO %d", CFG_LATENCY_TEST_PIN);
+
     return ESP_OK;
 }
 
