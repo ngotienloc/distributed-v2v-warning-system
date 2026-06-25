@@ -125,6 +125,8 @@ typedef struct {
     float last_drift;              /* sai số vị trí ở lần đo cuối cùng (m) */
     bool last_drift_valid;         /* true = kết quả sai số cuối cùng hợp lệ */
     volatile bool trigger_double_beep; /* true = yêu cầu kêu bíp kép khi đo xong */
+    volatile bool trigger_start_beep;  /* true = yêu cầu kêu bíp ngắn khi bắt đầu đo */
+    uint32_t last_test_end_ms;         /* thời điểm kết thúc đo cuối cùng để tính cooldown */
 } dr_test_state_t;
 
 extern dr_test_state_t g_dr_test;

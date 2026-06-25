@@ -14,6 +14,7 @@
 #include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 static const char *TAG = "task_fusion";
 
@@ -45,6 +46,52 @@ void task_fusion(void *arg)
         }
 
         if (imu.dt <= 0.001f || imu.dt > 0.05f) imu.dt = 0.01f;
+
+        /* ── 1.1. Phát hiện cử chỉ lắc thiết bị để chuyển chế độ test ──── */
+        if (g_dr_test.mode == 0) {
+            static float s_prev_ax = 0.0f;
+            static float s_prev_ay = 0.0f;
+            static float s_prev_az = 0.0f;
+            static int s_shake_count = 0;
+            static uint32_t s_last_shake_time = 0;
+
+            float dx = imu.accel_x - s_prev_ax;
+            float dy = imu.accel_y - s_prev_ay;
+            float dz = imu.accel_z - s_prev_az;
+
+            s_prev_ax = imu.accel_x;
+            s_prev_ay = imu.accel_y;
+            s_prev_az = imu.accel_z;
+
+            float diff_mag = sqrtf(dx * dx + dy * dy + dz * dz);
+            uint32_t now = now_ms();
+
+            // Nếu biến thiên gia tốc lớn (> 5.0 m/s2 trong 10ms), tăng đếm
+            if (diff_mag > 5.0f) {
+                s_shake_count++;
+                s_last_shake_time = now;
+            }
+
+            // Nếu quá 500ms không có cú lắc nào mới, reset đếm
+            if (now - s_last_shake_time > 500) {
+                s_shake_count = 0;
+            }
+
+            // Nếu đếm đủ 15 lần vượt ngưỡng trong vòng 500ms -> Xác nhận lắc
+            if (s_shake_count >= 15) {
+                s_shake_count = 0;
+                ESP_LOGW(TAG, "Device shake detected! Switching to DR Test mode...");
+                
+                g_dr_test.mode = 1;
+                memset(g_dr_test.result_count, 0, sizeof(g_dr_test.result_count));
+                memset(g_dr_test.results, 0, sizeof(g_dr_test.results));
+                g_dr_test.outage_active = false;
+                g_dr_test.waiting_first_fix = false;
+                g_dr_test.last_drift_valid = false;
+                g_dr_test.last_test_end_ms = now;
+                g_dr_test.trigger_double_beep = true; // Kêu bíp kép xác nhận chuyển màn
+            }
+        }
 
         /* ── 2. Cập nhật Complementary Filter ───────────────────────── */
         imu_filter_update(&cf, &imu, imu.dt);

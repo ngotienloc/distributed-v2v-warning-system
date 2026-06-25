@@ -112,13 +112,41 @@ void task_localization(void *arg)
                         }
                         g_dr_test.results[m_idx][4] = error;
                     }
+
+                    // Tự động chuyển mode tiếp theo nếu đủ 5 lần test
+                    if (g_dr_test.result_count[m_idx] >= 5) {
+                        g_dr_test.mode++;
+                        if (g_dr_test.mode > 4) {
+                            g_dr_test.mode = 0; // Quay về màn hình ADAS chính
+                        }
+                    }
                 }
                 g_dr_test.last_drift = error;
                 g_dr_test.last_drift_valid = true;
                 g_dr_test.waiting_first_fix = false;
+                g_dr_test.last_test_end_ms = now_ms(); // Cập nhật thời điểm hoàn thành để tính cooldown
                 g_dr_test.trigger_double_beep = true; /* Yêu cầu kêu bíp kép bên task_button */
 
-                ESP_LOGI(TAG, "DR TEST: Mode %d, Error = %.2f m", g_dr_test.mode, error);
+                ESP_LOGI(TAG, "DR TEST: Run finished. Error = %.2f m. Next mode: %d", error, g_dr_test.mode);
+            } else if (g_dr_test.mode > 0) {
+                /* Nếu đang ở chế độ test và không có cuộc đo nào đang chạy (và không đang chờ GPS fix đo sai số) */
+                uint32_t now = now_ms();
+                // Cooldown 10s sau lần test trước
+                if (now - g_dr_test.last_test_end_ms >= 10000) {
+                    // Kiểm tra tốc độ đạt >= 20 km/h (5.55 m/s)
+                    if (fused.gps.speed >= (20.0f / 3.6f)) {
+                        const uint32_t durations_ms[5] = {0, 5000, 10000, 20000, 30000};
+                        
+                        g_dr_test.outage_active = true;
+                        g_dr_test.outage_start_ms = now;
+                        g_dr_test.outage_duration_ms = durations_ms[g_dr_test.mode];
+                        g_dr_test.waiting_first_fix = false;
+                        g_dr_test.trigger_start_beep = true; // Yêu cầu bíp ngắn báo bắt đầu test
+
+                        ESP_LOGW(TAG, "AUTO TRIGGER: Mode %d test start! Speed = %.2f km/h, Outage = %d ms",
+                                 g_dr_test.mode, fused.gps.speed * 3.6f, (int)g_dr_test.outage_duration_ms);
+                    }
+                }
             }
 
             /* Reset DR về (0,0) tại đúng thời điểm GPS fix — không ngoại suy.

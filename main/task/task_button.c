@@ -45,7 +45,6 @@ void task_button(void *arg)
 
     int press_ticks = 0;
     bool long_press_triggered = false;
-    const uint32_t durations_ms[5] = {0, 5000, 10000, 20000, 30000};
 
     while (1) {
         /* Đọc trạng thái nút nhấn (0 = nhấn, 1 = nhả) */
@@ -60,27 +59,16 @@ void task_button(void *arg)
                 g_dr_test.outage_active = false;
                 g_dr_test.waiting_first_fix = false;
                 g_dr_test.trigger_double_beep = false;
+                g_dr_test.trigger_start_beep = false;
+                g_dr_test.last_drift_valid = false;
+                memset(g_dr_test.result_count, 0, sizeof(g_dr_test.result_count));
+                memset(g_dr_test.results, 0, sizeof(g_dr_test.results));
 
                 ESP_LOGI(TAG, "Mode switched to %d (0: ADAS, 1: 5s, 2: 10s, 3: 20s, 4: 30s)", g_dr_test.mode);
                 trigger_beep(100);
             }
         } else {
-            /* Nút nhả: kiểm tra nhấn ngắn nếu chưa kích hoạt nhấn giữ */
-            if (press_ticks > 2 && !long_press_triggered) {
-                /* Nhấn ngắn: kích hoạt đo nếu ở chế độ test */
-                if (g_dr_test.mode > 0) {
-                    if (!g_dr_test.outage_active && !g_dr_test.waiting_first_fix) {
-                        g_dr_test.outage_active = true;
-                        g_dr_test.outage_start_ms = now_ms();
-                        g_dr_test.outage_duration_ms = durations_ms[g_dr_test.mode];
-                        g_dr_test.waiting_first_fix = false;
-                        g_dr_test.trigger_double_beep = false;
-
-                        ESP_LOGI(TAG, "GPS Outage simulation started: %d ms", (int)g_dr_test.outage_duration_ms);
-                        trigger_beep(100);
-                    }
-                }
-            }
+            /* Nút nhả: nhấn ngắn ở chế độ tự động không làm gì */
             press_ticks = 0;
             long_press_triggered = false;
         }
@@ -95,6 +83,12 @@ void task_button(void *arg)
                 ESP_LOGI(TAG, "GPS Outage simulation ended. Waiting for first GPS fix...");
                 trigger_beep(150);
             }
+        }
+
+        /* Kiểm tra yêu cầu bíp báo bắt đầu cuộc đo */
+        if (g_dr_test.trigger_start_beep) {
+            g_dr_test.trigger_start_beep = false;
+            trigger_beep(100);
         }
 
         /* Kiểm tra yêu cầu bíp báo hoàn thành cuộc đo */
