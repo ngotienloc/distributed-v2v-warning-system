@@ -21,8 +21,8 @@
 static const char *TAG = "task_localization";
 
 /* Tốc độ decay velocity khi mất GPS (%/giây).
- * 0.3 = giảm 30%/s — đủ nhẹ để không báo động trong đường hầm ngắn. */
-#define DR_DECAY_PER_S  0.3f
+ * 0.05 = giảm 5%/s — giữ vận tốc ổn định tốt hơn khi đi qua hầm dài. */
+#define DR_DECAY_PER_S  0.05f
 
 /* ── IMU snapshot ring buffer ────────────────────────────────────────────
  * Lưu tối đa IMU_BUF_SIZE mẫu fusion gần nhất để tái tích phân khi GPS fix.
