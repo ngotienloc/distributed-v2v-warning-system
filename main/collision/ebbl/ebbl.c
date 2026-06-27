@@ -69,9 +69,12 @@ alert_result_t ebbl_eval(const vehicle_state_t *self,
 
     /* ── Bộ lọc Heading Match ─────────────────────────────────────────────────────
      * Chỉ cảnh báo nếu 2 xe di chuyển cùng chiều (lệch heading < CFG_EBBL_HEADING_LIMIT).
-     * Loại bỏ xe ngược chiều và xe đi cắt ngang ngã tư dù góc cone quét trúng. */
-    float hdg_diff = fabsf(angle_diff(self->heading, peer->heading));
-    if (hdg_diff > DEG2RAD(CFG_EBBL_HEADING_LIMIT)) return res;
+     * Loại bỏ xe ngược chiều và xe đi cắt ngang ngã tư dù góc cone quét trúng.
+     * Bỏ qua lọc heading nếu peer đang đứng yên (velocity < 1.0 m/s) vì xe đỗ tĩnh vẫn là vật cản nguy hiểm. */
+    if (peer->velocity >= 1.0f) {
+        float hdg_diff = fabsf(angle_diff(self->heading, peer->heading));
+        if (hdg_diff > DEG2RAD(CFG_EBBL_HEADING_LIMIT)) return res;
+    }
 
     float d, approach;
     if (!compute_approach(self, peer, &d, &approach)) return res;
@@ -96,8 +99,8 @@ alert_result_t ebbl_eval(const vehicle_state_t *self,
 
     /* ── Path B: TTC proximity — peer không phanh nhưng ego tiếp cận nhanh ──
      * Bao gồm trường hợp peer đứng yên (accel~0) mà ego lao tới.
-     * Ngưỡng 1.4 m/s (~5 km/h) tránh cảnh báo giả khi đậu xe. */
-    if (approach > 1.4f) {
+     * Ngưỡng 0.5 m/s (~1.8 km/h) để dễ dàng test bằng cách đi bộ. */
+    if (approach > 0.5f) {
         float ttc = d / approach;
         alert_level_t lvl = ttc_to_level(ttc);
         if (lvl == ALERT_LEVEL_NONE) return res;

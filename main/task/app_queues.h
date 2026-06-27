@@ -29,8 +29,12 @@ extern QueueHandle_t q_collision_in;
 extern QueueHandle_t q_alert_tft;
 extern QueueHandle_t q_alert_buzzer;
 extern EventGroupHandle_t g_ebbl_evt;
+extern EventGroupHandle_t g_sys_state_evt;
 
 /* Bit báo hiệu phanh gấp — set bởi task_fusion, đọc bởi task_v2v */
 #define EBBL_BRAKE_BIT   BIT0
+
+/* Bit báo hiệu GPS đã bắt được sóng (fix valid) */
+#define SYS_GPS_READY_BIT BIT0
 
 esp_err_t app_queues_init(void);

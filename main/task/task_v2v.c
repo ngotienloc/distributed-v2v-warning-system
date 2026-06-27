@@ -45,6 +45,13 @@ static void do_broadcast(alert_type_t type, alert_level_t level)
         ESP_LOGD(TAG, "skip TX: ego state chưa sẵn sàng");
         return;
     }
+
+    /* Chờ GPS có fix mới cho phép phát để tránh nhiễu sóng GPS lúc khởi động */
+    if (!(xEventGroupGetBits(g_sys_state_evt) & SYS_GPS_READY_BIT)) {
+        ESP_LOGD(TAG, "skip TX: chờ GPS fix để tránh nhiễu sóng");
+        return;
+    }
+
     v2v_packet_t pkt;
     packet_serialize(&s_ego, type, level, &pkt);
     espnow_broadcast(&pkt);

@@ -38,6 +38,9 @@ static void on_fix(const gps_fix_t *fix, void *ctx)
     if (xQueueSend(q_gps, &msg, 0) != pdTRUE) {
         ESP_LOGW(TAG, "q_gps full — GPS fix dropped");
     }
+
+    /* Đánh dấu GPS đã có fix để cho phép V2V phát ESP-NOW */
+    xEventGroupSetBits(g_sys_state_evt, SYS_GPS_READY_BIT);
 }
 
 /* ── Task entry ─────────────────────────────────────────────────────── */
