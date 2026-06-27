@@ -128,3 +128,22 @@ typedef struct {
 } dr_test_state_t;
 
 extern dr_test_state_t g_dr_test;
+
+typedef struct {
+    float latitude;
+    float longitude;
+    float speed;          /* m/s */
+    float course;         /* rad */
+    float altitude;       /* m */
+    float hdop;
+    float pdop;
+    float vdop;
+    int num_sats;
+    int fix_quality;      /* GGA: 0=no, 1=SPS, 2=DGPS, 4=RTK, 6=DR... */
+    int fix_mode;         /* GSA: 1=no, 2=2D, 3=3D */
+    bool valid;
+    char sat_type[32];    /* e.g., "GPS", "GLONASS GLO BDS", etc. */
+    uint32_t last_update_ms;
+} gps_debug_t;
+
+extern volatile gps_debug_t g_gps_debug;

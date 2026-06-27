@@ -22,6 +22,7 @@
 #include "task/task_button.h"
 
 dr_test_state_t g_dr_test = {0};
+volatile gps_debug_t g_gps_debug = {0};
 
 static const char *TAG = "main";
 

@@ -504,18 +504,13 @@ static void render_frame(void)
 static void render_test_frame(void)
 {
     static int s_last_mode = -1;
-    static int s_last_result_count = -1;
     static bool s_last_outage_active = false;
     static bool s_last_waiting_first_fix = false;
-    static int s_last_speed = -1;
     static uint32_t s_last_elapsed_sec = 9999;
     
     int mode = g_dr_test.mode;
-    int m_idx = mode - 1;
-    int result_count = (m_idx >= 0 && m_idx < 4) ? g_dr_test.result_count[m_idx] : 0;
     bool outage_active = g_dr_test.outage_active;
     bool waiting_first_fix = g_dr_test.waiting_first_fix;
-    int speed_kmh = (int)(s_ci.ego.velocity * 3.6f);
     
     uint32_t elapsed_ms = 0;
     if (outage_active) {
@@ -534,10 +529,11 @@ static void render_test_frame(void)
     /* 1. Vẽ Header */
     if (force_redraw) {
         tft_fill_rect(0, 0, CFG_TFT_WIDTH, 20, TFT_RGB(20, 80, 200));
-        char title[20];
+        char title[24];
         int seconds_tbl[5] = {0, 5, 10, 20, 30};
-        snprintf(title, sizeof(title), "DR TEST: %ds", seconds_tbl[mode]);
-        tft_draw_str(28, 6, title, TFT_WHITE, TFT_RGB(20, 80, 200), 1);
+        snprintf(title, sizeof(title), "GPS TEST (%ds)", seconds_tbl[mode]);
+        int len = strlen(title);
+        tft_draw_str((CFG_TFT_WIDTH - len * 6) / 2, 6, title, TFT_WHITE, TFT_RGB(20, 80, 200), 1);
     }
     
     /* 2. Vẽ trạng thái kiểm thử */
@@ -549,66 +545,105 @@ static void render_test_frame(void)
         s_last_waiting_first_fix = waiting_first_fix;
         s_last_elapsed_sec = elapsed_sec;
         
-        tft_fill_rect(0, 22, CFG_TFT_WIDTH, 10, TFT_BG_IDLE);
-        
+        char status_str[24];
+        uint16_t status_col;
         if (outage_active) {
-            char status_str[24];
             int seconds_tbl[5] = {0, 5, 10, 20, 30};
             int remaining = seconds_tbl[mode] - (int)elapsed_sec;
             if (remaining < 0) remaining = 0;
-            snprintf(status_str, sizeof(status_str), "RUNNING: %ds", remaining);
-            int len = strlen(status_str);
-            tft_draw_str((CFG_TFT_WIDTH - len * 6) / 2, 23, status_str, TFT_RGB(255, 120, 0), TFT_BG_IDLE, 1);
+            snprintf(status_str, sizeof(status_str), "OUTAGE: %ds ", remaining);
+            status_col = TFT_RGB(255, 120, 0);
         } else if (waiting_first_fix) {
-            tft_draw_str((CFG_TFT_WIDTH - 15 * 6) / 2, 23, "WAITING GPS FIX", TFT_RGB(0, 200, 255), TFT_BG_IDLE, 1);
+            snprintf(status_str, sizeof(status_str), "WAITING FIX ");
+            status_col = TFT_RGB(0, 200, 255);
         } else {
-            tft_draw_str((CFG_TFT_WIDTH - 17 * 6) / 2, 23, "READY (PRESS BOOT)", TFT_RGB(0, 220, 100), TFT_BG_IDLE, 1);
+            snprintf(status_str, sizeof(status_str), "ACTIVE      ");
+            status_col = TFT_RGB(0, 220, 100);
         }
+        
+        tft_draw_str(10, 24, "STATUS:", TFT_GRAY, TFT_BG_IDLE, 1);
+        tft_draw_str(58, 24, status_str, status_col, TFT_BG_IDLE, 1);
     }
     
-    /* 3. Vẽ Tốc độ */
-    if (force_redraw || speed_kmh != s_last_speed) {
-        s_last_speed = speed_kmh;
-        tft_fill_rect(0, 35, CFG_TFT_WIDTH, 14, TFT_BG_IDLE);
-        char spd_str[24];
-        snprintf(spd_str, sizeof(spd_str), "SPEED: %d km/h", speed_kmh);
-        int len = strlen(spd_str);
-        uint16_t color = (speed_kmh >= 27 && speed_kmh <= 33) ? TFT_RGB(0, 255, 100) : TFT_WHITE;
-        tft_draw_str((CFG_TFT_WIDTH - len * 6) / 2, 38, spd_str, color, TFT_BG_IDLE, 1);
+    /* 3. Vẽ Tọa độ & Thông tin GPS */
+    char buf[48];
+    uint16_t val_color = g_gps_debug.valid ? TFT_WHITE : TFT_GRAY;
+    
+    // LAT
+    snprintf(buf, sizeof(buf), "%10.6f ", g_gps_debug.latitude);
+    tft_draw_str(10, 36, "LAT:", TFT_GRAY, TFT_BG_IDLE, 1);
+    tft_draw_str(40, 36, buf, val_color, TFT_BG_IDLE, 1);
+    
+    // LON
+    snprintf(buf, sizeof(buf), "%10.6f ", g_gps_debug.longitude);
+    tft_draw_str(10, 47, "LON:", TFT_GRAY, TFT_BG_IDLE, 1);
+    tft_draw_str(40, 47, buf, val_color, TFT_BG_IDLE, 1);
+    
+    // ALT
+    snprintf(buf, sizeof(buf), "%6.1f m ", g_gps_debug.altitude);
+    tft_draw_str(10, 58, "ALT:", TFT_GRAY, TFT_BG_IDLE, 1);
+    tft_draw_str(40, 58, buf, val_color, TFT_BG_IDLE, 1);
+    
+    // SPEED
+    snprintf(buf, sizeof(buf), "%5.1f km/h ", g_gps_debug.speed * 3.6f);
+    tft_draw_str(10, 69, "SPD:", TFT_GRAY, TFT_BG_IDLE, 1);
+    tft_draw_str(40, 69, buf, val_color, TFT_BG_IDLE, 1);
+    
+    // HEADING
+    int hdg_deg = (int)(g_gps_debug.course * 57.29578f);
+    hdg_deg = (hdg_deg % 360 + 360) % 360;
+    const char *comp = "N ";
+    if (hdg_deg >= 338 || hdg_deg < 23)        comp = "N ";
+    else if (hdg_deg >= 23  && hdg_deg < 68)   comp = "NE";
+    else if (hdg_deg >= 68  && hdg_deg < 113)  comp = "E ";
+    else if (hdg_deg >= 113 && hdg_deg < 158)  comp = "SE";
+    else if (hdg_deg >= 158 && hdg_deg < 203)  comp = "S ";
+    else if (hdg_deg >= 203 && hdg_deg < 248)  comp = "SW";
+    else if (hdg_deg >= 248 && hdg_deg < 293)  comp = "W ";
+    else                                       comp = "NW";
+    snprintf(buf, sizeof(buf), "%3d* (%s)  ", hdg_deg, comp);
+    tft_draw_str(10, 80, "HDG:", TFT_GRAY, TFT_BG_IDLE, 1);
+    tft_draw_str(40, 80, buf, val_color, TFT_BG_IDLE, 1);
+    
+    // SATS & FIX
+    const char *fix_str = "NO";
+    if (g_gps_debug.fix_mode == 2) fix_str = "2D";
+    else if (g_gps_debug.fix_mode == 3) fix_str = "3D";
+    
+    const char *qual_str = "NONE";
+    if (g_gps_debug.fix_quality == 1) qual_str = "SPS";
+    else if (g_gps_debug.fix_quality == 2) qual_str = "DGP";
+    else if (g_gps_debug.fix_quality == 4) qual_str = "RTK";
+    else if (g_gps_debug.fix_quality == 6) qual_str = "DR ";
+    
+    snprintf(buf, sizeof(buf), "%2d (%s/%s)   ", g_gps_debug.num_sats, fix_str, qual_str);
+    tft_draw_str(10, 91, "SAT:", TFT_GRAY, TFT_BG_IDLE, 1);
+    tft_draw_str(40, 91, buf, val_color, TFT_BG_IDLE, 1);
+    
+    // DOPs
+    snprintf(buf, sizeof(buf), "H:%.1f P:%.1f V:%.1f ", g_gps_debug.hdop, g_gps_debug.pdop, g_gps_debug.vdop);
+    tft_draw_str(10, 102, "DOP:", TFT_GRAY, TFT_BG_IDLE, 1);
+    tft_draw_str(40, 102, buf, val_color, TFT_BG_IDLE, 1);
+    
+    // CONSTELLATIONS
+    snprintf(buf, sizeof(buf), "%-12s ", g_gps_debug.sat_type[0] ? (char*)g_gps_debug.sat_type : "NONE");
+    tft_draw_str(10, 113, "SYS:", TFT_GRAY, TFT_BG_IDLE, 1);
+    tft_draw_str(40, 113, buf, TFT_RGB(0, 220, 100), TFT_BG_IDLE, 1);
+    
+    // LAST MEASURED DRIFT
+    tft_draw_str(10, 124, "L.ERR:", TFT_GRAY, TFT_BG_IDLE, 1);
+    if (g_dr_test.last_drift_valid) {
+        snprintf(buf, sizeof(buf), "%.2f m   ", g_dr_test.last_drift);
+        tft_draw_str(52, 124, buf, TFT_YELLOW, TFT_BG_IDLE, 1);
+    } else {
+        tft_draw_str(52, 124, "--.-- m   ", TFT_GRAY, TFT_BG_IDLE, 1);
     }
     
-    /* 4. Đường phân cách */
+    /* 4. Trợ giúp nút nhấn chân màn hình */
     if (force_redraw) {
-        tft_draw_line(10, 52, 118, 52, TFT_GRAY);
-    }
-    
-    /* 5. Tiêu đề kết quả */
-    if (force_redraw) {
-        tft_draw_str(10, 58, "RESULTS (5 SAMPLES):", TFT_YELLOW, TFT_BG_IDLE, 1);
-    }
-    
-    /* 6. Vẽ danh sách 5 kết quả đo */
-    if (force_redraw || result_count != s_last_result_count) {
-        s_last_result_count = result_count;
-        for (int i = 0; i < 5; i++) {
-            int y = 70 + i * 11;
-            tft_fill_rect(10, y, CFG_TFT_WIDTH - 20, 10, TFT_BG_IDLE);
-            char res_str[32];
-            if (m_idx >= 0 && m_idx < 4 && i < result_count) {
-                snprintf(res_str, sizeof(res_str), "%d.  %.2f m", i + 1, g_dr_test.results[m_idx][i]);
-                tft_draw_str(10, y, res_str, TFT_WHITE, TFT_BG_IDLE, 1);
-            } else {
-                snprintf(res_str, sizeof(res_str), "%d.  --.-- m", i + 1);
-                tft_draw_str(10, y, res_str, TFT_GRAY, TFT_BG_IDLE, 1);
-            }
-        }
-    }
-    
-    /* 7. Trợ giúp nút nhấn chân màn hình */
-    if (force_redraw) {
-        tft_draw_line(10, 130, 118, 130, TFT_RGB(30, 50, 70));
-        tft_draw_str(6, 136, "BOOT: Start Test", TFT_GRAY, TFT_BG_IDLE, 1);
-        tft_draw_str(6, 147, "HOLD BOOT: Change Mode", TFT_GRAY, TFT_BG_IDLE, 1);
+        tft_draw_line(10, 136, 118, 136, TFT_RGB(30, 50, 70));
+        tft_draw_str(6, 142, "BOOT: Trigger Outage", TFT_GRAY, TFT_BG_IDLE, 1);
+        tft_draw_str(6, 151, "HOLD: Switch Mode", TFT_GRAY, TFT_BG_IDLE, 1);
     }
 }
 

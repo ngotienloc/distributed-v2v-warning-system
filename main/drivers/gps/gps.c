@@ -23,6 +23,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include "types.h"
 
 static const char *TAG = "gps";
 
@@ -76,9 +77,18 @@ static void ubx_disable_nmea(uint8_t nmea_cls, uint8_t nmea_id)
     vTaskDelay(pdMS_TO_TICKS(30));
 }
 
-/* Cấu hình NEO-6M cho chế độ 5 Hz, chỉ xuất RMC:
+/* Bật một loại câu NMEA trên cổng UART1 (rate = 1) */
+static void ubx_enable_nmea(uint8_t nmea_cls, uint8_t nmea_id)
+{
+    /* CFG-MSG (8 byte): msgClass, msgID, rate[6] cho I2C/UART1/UART2/USB/SPI/reserved */
+    const uint8_t payload[8] = { nmea_cls, nmea_id, 0, 1, 0, 0, 0, 0 };
+    ubx_send(0x06, 0x01, payload, sizeof(payload));
+    vTaskDelay(pdMS_TO_TICKS(30));
+}
+
+/* Cấu hình NEO-6M cho chế độ 5 Hz, xuất RMC, GGA và GSA:
  *   1. Đổi baud module → 115200 (UBX-CFG-PRT)
- *   2. Tắt GGA, GLL, GSA, GSV, VTG
+ *   2. Bật RMC, GGA, GSA; Tắt GLL, GSV, VTG
  *   3. Đặt chu kỳ đo 200 ms = 5 Hz (UBX-CFG-RATE)
  * Gọi khi ESP32 UART vẫn ở 9600 baud (CFG_GPS_UART_BAUD_BOOT). */
 #if GPS_MODEL == GPS_MODEL_NEO6M
@@ -103,13 +113,14 @@ static void gps_neo6m_configure(void)
     ESP_LOGI(TAG, "NEO-6M baud -> %d", CFG_GPS_UART_BAUD);
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    /* ── Bước 2: Tắt các câu không dùng, giữ lại RMC (F0/04) ─────────── */
-    ubx_disable_nmea(0xF0, 0x00);   /* GGA */
+    /* ── Bước 2: Bật các câu cần thiết, tắt các câu không dùng ─────────── */
     ubx_disable_nmea(0xF0, 0x01);   /* GLL */
-    ubx_disable_nmea(0xF0, 0x02);   /* GSA */
     ubx_disable_nmea(0xF0, 0x03);   /* GSV */
     ubx_disable_nmea(0xF0, 0x05);   /* VTG */
-    ESP_LOGI(TAG, "NEO-6M: GGA/GLL/GSA/GSV/VTG disabled, RMC only");
+    ubx_enable_nmea(0xF0, 0x00);    /* GGA */
+    ubx_enable_nmea(0xF0, 0x02);    /* GSA */
+    ubx_enable_nmea(0xF0, 0x04);    /* RMC */
+    ESP_LOGI(TAG, "NEO-6M: GGA/GSA/RMC enabled, GLL/GSV/VTG disabled");
 
     /* ── Bước 3: Đặt tốc độ đo 5 Hz (measRate = 200 ms) ──────────────── */
     const uint8_t cfg_rate[6] = {
@@ -123,9 +134,9 @@ static void gps_neo6m_configure(void)
 }
 #endif
 
-/* Cấu hình NEO-8M cho chế độ 10 Hz, chỉ xuất RMC:
+/* Cấu hình NEO-8M cho chế độ 10 Hz, xuất RMC, GGA và GSA:
  *   1. Đổi baud module → 115200 (UBX-CFG-PRT)
- *   2. Tắt GGA, GLL, GSA, GSV, VTG, GNS
+ *   2. Bật RMC, GGA, GSA; Tắt GLL, GSV, VTG, GNS
  *   3. Đặt chu kỳ đo 100 ms = 10 Hz (UBX-CFG-RATE)
  * NEO-8M hỗ trợ đa chòm sao (GPS+GLONASS+Galileo) → $GNRMC.
  * Gọi khi ESP32 UART vẫn ở 9600 baud (CFG_GPS_UART_BAUD_BOOT). */
@@ -152,14 +163,15 @@ static void gps_neo8m_configure(void)
     ESP_LOGI(TAG, "NEO-8M baud -> %d", CFG_GPS_UART_BAUD);
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    /* ── Bước 2: Tắt các câu không dùng, giữ lại RMC ─────────────────── */
-    ubx_disable_nmea(0xF0, 0x00);   /* GGA */
+    /* ── Bước 2: Bật các câu cần thiết, tắt các câu không dùng ─────────── */
     ubx_disable_nmea(0xF0, 0x01);   /* GLL */
-    ubx_disable_nmea(0xF0, 0x02);   /* GSA */
     ubx_disable_nmea(0xF0, 0x03);   /* GSV */
     ubx_disable_nmea(0xF0, 0x05);   /* VTG */
     ubx_disable_nmea(0xF0, 0x0D);   /* GNS — câu thêm của NEO-8M multi-GNSS */
-    ESP_LOGI(TAG, "NEO-8M: GGA/GLL/GSA/GSV/VTG/GNS disabled, RMC only");
+    ubx_enable_nmea(0xF0, 0x00);    /* GGA */
+    ubx_enable_nmea(0xF0, 0x02);    /* GSA */
+    ubx_enable_nmea(0xF0, 0x04);    /* RMC */
+    ESP_LOGI(TAG, "NEO-8M: GGA/GSA/RMC enabled, GLL/GSV/VTG/GNS disabled");
 
     /* ── Bước 3: Đặt tốc độ đo 10 Hz (measRate = 100 ms) ─────────────── */
     const uint8_t cfg_rate[6] = {
@@ -172,6 +184,7 @@ static void gps_neo8m_configure(void)
     ESP_LOGI(TAG, "NEO-8M: rate set to %d Hz (measRate=100ms)", CFG_GPS_RATE_HZ);
 }
 #endif
+
 
 /* Chuyển chuỗi NMEA dạng DDDMM.MMMM + chỉ hướng → decimal degrees */
 static float parse_coord(const char *field, char dir)
@@ -226,20 +239,49 @@ static void process_sentence(const char *sentence)
     char *f[20] = {0};
     int   nf    = tokenize(buf, f, 20);
     if (nf < 6) return;
+    if (strlen(f[0]) < 6) return;
 
-    bool is_rmc = (strncmp(f[0], "$GPRMC", 6) == 0 ||
-                   strncmp(f[0], "$GNRMC", 6) == 0);
-    bool is_gga = (strncmp(f[0], "$GPGGA", 6) == 0 ||
-                   strncmp(f[0], "$GNGGA", 6) == 0);
+    bool is_rmc = (strncmp(f[0] + 3, "RMC", 3) == 0);
+    bool is_gga = (strncmp(f[0] + 3, "GGA", 3) == 0);
+    bool is_gsa = (strncmp(f[0] + 3, "GSA", 3) == 0);
+
+    /* Xác định loại vệ tinh / hệ chòm sao từ talker ID */
+    char talker[3] = { f[0][1], f[0][2], '\0' };
+    uint32_t t = now_ms();
+    static uint32_t last_gp_seen = 0;
+    static uint32_t last_gl_seen = 0;
+    static uint32_t last_ga_seen = 0;
+    static uint32_t last_gb_seen = 0;
+
+    if (talker[0] == 'G' && talker[1] == 'P') last_gp_seen = t;
+    else if (talker[0] == 'G' && talker[1] == 'L') last_gl_seen = t;
+    else if (talker[0] == 'G' && talker[1] == 'A') last_ga_seen = t;
+    else if (talker[0] == 'G' && (talker[1] == 'B' || talker[1] == 'D')) last_gb_seen = t;
+
+    char sat_types[32] = "";
+    if (t - last_gp_seen < 2000) strcat(sat_types, "GPS ");
+    if (t - last_gl_seen < 2000) strcat(sat_types, "GLO ");
+    if (t - last_ga_seen < 2000) strcat(sat_types, "GAL ");
+    if (t - last_gb_seen < 2000) strcat(sat_types, "BDS ");
+
+    int sat_len = strlen(sat_types);
+    if (sat_len > 0 && sat_types[sat_len - 1] == ' ') {
+        sat_types[sat_len - 1] = '\0';
+    } else if (sat_len == 0) {
+        strcpy(sat_types, "NONE");
+    }
+    strncpy((char*)g_gps_debug.sat_type, sat_types, sizeof(g_gps_debug.sat_type) - 1);
 
     if (is_rmc && nf >= 9) {
-        if (f[2][0] != 'A') return;  /* chỉ xử lý khi status = 'A' (Active/Fix) */
+        if (f[2][0] != 'A') {
+            g_gps_debug.valid = false;
+            return;  /* chỉ xử lý khi status = 'A' (Active/Fix) */
+        }
         s_last_fix.lat         = parse_coord(f[3], f[4][0]);
         s_last_fix.lon         = parse_coord(f[5], f[6][0]);
         s_last_fix.speed_ms    = strtof(f[7], NULL) * 0.51444f;  /* knots → m/s */
         s_last_fix.heading_rad = strtof(f[8], NULL) * (float)M_PI / 180.0f;
 
-        uint32_t t              = now_ms();
         s_last_fix.valid        = true;
         s_last_fix.timestamp_ms = t;
         s_has_fix               = true;
@@ -247,19 +289,44 @@ static void process_sentence(const char *sentence)
 
         if (s_cb) s_cb(&s_last_fix, s_cb_ctx);
 
+        /* Cập nhật g_gps_debug */
+        g_gps_debug.latitude     = s_last_fix.lat;
+        g_gps_debug.longitude    = s_last_fix.lon;
+        g_gps_debug.speed        = s_last_fix.speed_ms;
+        g_gps_debug.course       = s_last_fix.heading_rad;
+        g_gps_debug.valid        = true;
+        g_gps_debug.last_update_ms = t;
+
         ESP_LOGD(TAG, "RMC fix lat=%.6f lon=%.6f spd=%.2f hdg=%.1f°",
                  s_last_fix.lat, s_last_fix.lon,
                  s_last_fix.speed_ms,
                  s_last_fix.heading_rad * 180.0f / (float)M_PI);
 
-    } else if (is_gga && nf >= 7) {
-        /* GGA không có speed/heading → chỉ lưu nội bộ, KHÔNG gọi callback
-         * để tránh gửi speed/heading cũ (bị trễ 1 giây) xuống pipeline. */
-        if (atoi(f[6]) == 0) return;  /* fix quality = 0 = invalid */
-        s_last_fix.lat = parse_coord(f[2], f[3][0]);
-        s_last_fix.lon = parse_coord(f[4], f[5][0]);
-        ESP_LOGV(TAG, "GGA lat=%.6f lon=%.6f (no callback)",
-                 s_last_fix.lat, s_last_fix.lon);
+    } else if (is_gga && nf >= 10) {
+        int qual = atoi(f[6]);
+        g_gps_debug.fix_quality = qual;
+        g_gps_debug.num_sats    = atoi(f[7]);
+        g_gps_debug.hdop        = strtof(f[8], NULL);
+        g_gps_debug.altitude    = strtof(f[9], NULL);
+        g_gps_debug.last_update_ms = t;
+
+        if (qual > 0) {
+            s_last_fix.lat = parse_coord(f[2], f[3][0]);
+            s_last_fix.lon = parse_coord(f[4], f[5][0]);
+            g_gps_debug.latitude  = s_last_fix.lat;
+            g_gps_debug.longitude = s_last_fix.lon;
+        }
+        ESP_LOGV(TAG, "GGA lat=%.6f lon=%.6f qual=%d sats=%d alt=%.1fm",
+                 s_last_fix.lat, s_last_fix.lon, qual, g_gps_debug.num_sats, g_gps_debug.altitude);
+
+    } else if (is_gsa && nf >= 18) {
+        g_gps_debug.fix_mode    = atoi(f[2]);
+        g_gps_debug.pdop        = strtof(f[15], NULL);
+        g_gps_debug.hdop        = strtof(f[16], NULL);
+        g_gps_debug.vdop        = strtof(f[17], NULL);
+        g_gps_debug.last_update_ms = t;
+        ESP_LOGV(TAG, "GSA mode=%d pdop=%.2f hdop=%.2f vdop=%.2f",
+                 g_gps_debug.fix_mode, g_gps_debug.pdop, g_gps_debug.hdop, g_gps_debug.vdop);
     }
 }
 
@@ -283,11 +350,16 @@ static void uart_reader_task(void *arg)
                 if (slen < NMEA_MAX_LEN) sentence[slen++] = c;
                 if (c == '\n' && slen > 6) {
                     sentence[slen] = '\0';
-                    /* Chỉ forward RMC và GGA */
-                    if (strncmp(sentence, "$GPRMC", 6) == 0 ||
-                        strncmp(sentence, "$GNRMC", 6) == 0 ||
-                        strncmp(sentence, "$GPGGA", 6) == 0 ||
-                        strncmp(sentence, "$GNGGA", 6) == 0) {
+                    /* Forward RMC, GGA, và GSA với bất kỳ talker ID nào */
+                    bool match = false;
+                    if (slen >= 6 && sentence[0] == '$') {
+                        if (strncmp(sentence + 3, "RMC", 3) == 0 ||
+                            strncmp(sentence + 3, "GGA", 3) == 0 ||
+                            strncmp(sentence + 3, "GSA", 3) == 0) {
+                            match = true;
+                        }
+                    }
+                    if (match) {
                         char copy[NMEA_MAX_LEN + 1];
                         memcpy(copy, sentence, (size_t)slen + 1);
                         xQueueSend(s_sentence_q, copy, 0);  /* drop nếu queue đầy */
