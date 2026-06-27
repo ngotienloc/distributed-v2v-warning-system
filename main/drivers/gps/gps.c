@@ -297,7 +297,7 @@ static void process_sentence(const char *sentence)
         g_gps_debug.valid        = true;
         g_gps_debug.last_update_ms = t;
 
-        ESP_LOGD(TAG, "RMC fix lat=%.6f lon=%.6f spd=%.2f hdg=%.1f°",
+        ESP_LOGI(TAG, "RMC fix lat=%.6f lon=%.6f spd=%.2f hdg=%.1f°",
                  s_last_fix.lat, s_last_fix.lon,
                  s_last_fix.speed_ms,
                  s_last_fix.heading_rad * 180.0f / (float)M_PI);
@@ -316,7 +316,7 @@ static void process_sentence(const char *sentence)
             g_gps_debug.latitude  = s_last_fix.lat;
             g_gps_debug.longitude = s_last_fix.lon;
         }
-        ESP_LOGV(TAG, "GGA lat=%.6f lon=%.6f qual=%d sats=%d alt=%.1fm",
+        ESP_LOGI(TAG, "GGA lat=%.6f lon=%.6f qual=%d sats=%d alt=%.1fm",
                  s_last_fix.lat, s_last_fix.lon, qual, g_gps_debug.num_sats, g_gps_debug.altitude);
 
     } else if (is_gsa && nf >= 18) {
@@ -325,7 +325,7 @@ static void process_sentence(const char *sentence)
         g_gps_debug.hdop        = strtof(f[16], NULL);
         g_gps_debug.vdop        = strtof(f[17], NULL);
         g_gps_debug.last_update_ms = t;
-        ESP_LOGV(TAG, "GSA mode=%d pdop=%.2f hdop=%.2f vdop=%.2f",
+        ESP_LOGI(TAG, "GSA mode=%d pdop=%.2f hdop=%.2f vdop=%.2f",
                  g_gps_debug.fix_mode, g_gps_debug.pdop, g_gps_debug.hdop, g_gps_debug.vdop);
     }
 }
@@ -360,6 +360,8 @@ static void uart_reader_task(void *arg)
                         }
                     }
                     if (match) {
+                        // Print raw GPS NMEA sentence to UART console
+                        printf("%s", sentence);
                         char copy[NMEA_MAX_LEN + 1];
                         memcpy(copy, sentence, (size_t)slen + 1);
                         xQueueSend(s_sentence_q, copy, 0);  /* drop nếu queue đầy */
